@@ -487,7 +487,7 @@ build_libjxl() {
 } # python 3
 
 build_freetype() {
-  download_and_unpack_file https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
+  download_and_unpack_file https://sourceforge.net/projects/freetype/files/freetype2/2.13.3/freetype-2.13.3.tar.xz/download freetype-2.13.3 # savannah.gnu.org started returning persistent 502s for this file; SourceForge's URL ends in '/download', not the filename, so pass the dir explicitly.
   cd freetype-2.13.3
     if [[ ! -f builds/unix/install.mk.bak ]]; then
       sed -i.bak "/config \\\/s/\s*\\\//;/bindir) /s/\s*\\\//;/aclocal/d;/man1/d;/PLATFORM_DIR/d;/docs/d" builds/unix/install.mk # Library only.
@@ -1182,7 +1182,7 @@ fi
 
 # variables with their defaults
 build_ffmpeg_static=y
-original_cflags='-O2 -march=pentium3 -mtune=athlon-xp -mfpmath=sse -msse' # See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html, https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html and https://stackoverflow.com/questions/19689014/gcc-difference-between-o3-and-os.
+original_cflags='-O2 -march=core2 -mtune=core2' # Targets Core 2 (e.g. Q6600): up to SSSE3, no SSE4.1/4.2/AVX. See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html, https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html and https://stackoverflow.com/questions/19689014/gcc-difference-between-o3-and-os.
 export ac_cv_func__mktemp_s=no   # _mktemp_s is not available on WinXP.
 export ac_cv_func_vsnprintf_s=no # Mark vsnprintf_s as unavailable, as windows xp mscrt doesn't have it.
 
