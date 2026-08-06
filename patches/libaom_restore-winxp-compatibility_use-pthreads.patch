@@ -32,10 +32,10 @@ index 680120f..4cc2be7 100644
  #else
  /* Default version that performs no synchronization. */
  
-diff --git a/build/cmake/aom_configure.cmake b/build/cmake/aom_configure.cmake
+diff --git a/cmake/aom_configure.cmake b/cmake/aom_configure.cmake
 index ac3e132..01fff98 100644
---- a/build/cmake/aom_configure.cmake
-+++ b/build/cmake/aom_configure.cmake
+--- a/cmake/aom_configure.cmake
++++ b/cmake/aom_configure.cmake
 @@ -240,7 +240,7 @@ endif()
  if(AOM_TARGET_SYSTEM STREQUAL "Windows")
    # The default _WIN32_WINNT value in MinGW is 0x0502 (Windows XP with SP2). Set

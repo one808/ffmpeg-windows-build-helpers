@@ -238,7 +238,11 @@ generic_configure() {
 }
 
 do_cmake() {
-  local cmake_options=(-DENABLE_STATIC_RUNTIME=1 -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_FIND_ROOT_PATH=$mingw_w64_x86_64_prefix -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_RANLIB=${cross_prefix}ranlib.exe -DCMAKE_C_COMPILER=${cross_prefix}gcc.exe -DCMAKE_CXX_COMPILER=${cross_prefix}g++.exe -DCMAKE_RC_COMPILER=${cross_prefix}windres.exe -DCMAKE_INSTALL_PREFIX=$mingw_w64_x86_64_prefix "${@:2}" $1)
+  # NB: no '.exe' suffix on the cross-toolchain binary names here -- that's only
+  # correct when the cross-compiler itself was built under Cygwin (PE host tools).
+  # Built natively on Linux (as this fork's mingw-w64-build-r33 step does), the
+  # host-side gcc/g++/ranlib/windres are plain ELF binaries with no extension.
+  local cmake_options=(-DENABLE_STATIC_RUNTIME=1 -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_FIND_ROOT_PATH=$mingw_w64_x86_64_prefix -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_RANLIB=${cross_prefix}ranlib -DCMAKE_C_COMPILER=${cross_prefix}gcc -DCMAKE_CXX_COMPILER=${cross_prefix}g++ -DCMAKE_RC_COMPILER=${cross_prefix}windres -DCMAKE_INSTALL_PREFIX=$mingw_w64_x86_64_prefix "${@:2}" $1)
   local name=$(get_small_touchfile_name already_ran_cmake "${cmake_options[@]}")
   if [ ! -f $name ]; then
     echo -e "\e[1;33mConfiguring ${1##*/} as \"cmake -G \"Unix Makefiles\" ${cmake_options[@]}\".\e[0m"
@@ -336,7 +340,7 @@ build_python() {
   download_and_unpack_file https://www.python.org/ftp/python/3.4.10/Python-3.4.10.tar.xz
   cd Python-3.4.10
     apply_patch $patch_dir/python-3.4.10_cygwin.patch # Patches from http://cygwinxp.cathedral-networks.org/x86/release/python3/python3-3.4.3-1-src.tar.xz.
-    ac_cv_func_bind_textdomain_codeset=yes do_configure --prefix=/usr --with-dbmliborder=gdbm --with-libm= --without-ensurepip # 'configure'-options from 'python3.cygport' from within http://cygwinxp.cathedral-networks.org/x86/release/python3/python3-3.4.3-1-src.tar.xz.
+    ac_cv_func_bind_textdomain_codeset=yes do_configure --prefix=/usr --with-dbmliborder=gdbm --with-libm=-lm --without-ensurepip # 'configure'-options from 'python3.cygport' from within http://cygwinxp.cathedral-networks.org/x86/release/python3/python3-3.4.3-1-src.tar.xz. NB: '--with-libm=' (empty) is a Cygwin-ism (its libc already has libm); a native glibc host needs '-lm' explicitly or the final link fails with "undefined reference to fmod/pow/sqrt/...".
     do_make install
   cd ..
 }
@@ -396,12 +400,16 @@ build_liblzma() {
 } # [dlfcn]
 
 build_zlib() {
-  download_and_unpack_file http://zlib.net/zlib-1.3.1.tar.xz
+  download_and_unpack_file https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz # zlib.net dropped the 1.3.1 tarball (site only serves 1.3 and 1.3.2 now, not even under /fossils).
   cd zlib-1.3.1
     if [[ ! -f Makefile.in.bak ]]; then # Library only.
       sed -i.bak "/man3dir/d" Makefile.in
     fi
-    do_configure --prefix=$mingw_w64_x86_64_prefix --static
+    # zlib's hand-written configure (not autoconf) looks for a plain unprefixed
+    # "gcc"/"ar" unless told otherwise; there is none in the cross-toolchain bin
+    # dir (only i686-w64-mingw32-gcc etc.), so without this it silently falls
+    # through PATH to the native host gcc, which then rejects the XP -march flags.
+    CC=${cross_prefix}gcc AR=${cross_prefix}ar RANLIB=${cross_prefix}ranlib do_configure --prefix=$mingw_w64_x86_64_prefix --static
     do_make install $make_prefix_options
   cd ..
 }
@@ -432,10 +440,12 @@ build_sdl2() {
 build_libwebp() {
   do_git_checkout https://chromium.googlesource.com/webm/libwebp.git libwebp_git main
   cd libwebp_git
+    apply_patch $patch_dir/libwebp_winxp-compatible_no-srwlock.patch -p1 # src/dsp/cpu.h hard-#errors below Vista because its threaded DSP-init lazy-lock uses SRWLOCK; MinGW already links winpthreads, so just route it onto the existing (already XP-safe) pthread_mutex_t branch instead of the native-Win32 one.
+    apply_patch $patch_dir/libwebp_winxp-compatible_no-srwlock-thread-utils.patch -p1 # src/utils/thread_utils.c has its own SRWLOCK-based "simplistic pthread emulation" for _WIN32 (also Vista+ only); route MinGW onto its existing '#include <pthread.h>' branch instead, same reasoning as above.
     if [[ ! -f Makefile.am.bak ]]; then # Library only.
       sed -i.bak "s/src.*/src/;4,\$d" Makefile.am
     fi
-    generic_configure --disable-gl --disable-sdl --disable-png --disable-jpeg --disable-tiff --disable-gif --disable-wic # These are only necessary for building the bundled tools/binaries.
+    generic_configure --disable-gl --disable-sdl --disable-png --disable-jpeg --disable-tiff --disable-gif --disable-wic --disable-avx2 # gl/sdl/png/jpeg/tiff/gif/wic are only necessary for building the bundled tools/binaries. avx2: GCC 10.4 fails to inline the _mm256_cvtsi256_si32 intrinsic used in lossless_avx2.c ("undefined reference"); moot anyway since no WinXP-era CPU has AVX2.
     do_make install
   cd ..
 } # [dlfcn]
@@ -482,7 +492,10 @@ build_freetype() {
     if [[ ! -f builds/unix/install.mk.bak ]]; then
       sed -i.bak "/config \\\/s/\s*\\\//;/bindir) /s/\s*\\\//;/aclocal/d;/man1/d;/PLATFORM_DIR/d;/docs/d" builds/unix/install.mk # Library only.
     fi
-    generic_configure --build=i686-pc-cygwin --with-harfbuzz=no --with-brotli=no # Without '--build=i686-pc-cygwin' you'd get: "could not open '/cygdrive/[...]/include/freetype/ttnameid.h' for writing".
+    # Upstream forces '--build=i686-pc-cygwin' here to dodge a Cygwin /cygdrive path-translation bug.
+    # On native Linux that override is wrong (autoconf already detects the real build machine
+    # correctly via config.guess) and would make freetype's build system take Cygwin-only code paths.
+    generic_configure --with-harfbuzz=no --with-brotli=no
     do_make install
   cd ..
 } # [zlib, bzip2, libpng]
@@ -735,8 +748,8 @@ build_frei0r() {
       sed -i.bak 's/<future>/"mingw.future.h"/' src/filter/kaleid0sc0pe/kaleid0sc0pe.cpp # Use "mingw-std-threads" implementation of standard C++11 threading classes, which are currently still missing on MinGW GCC.
       sed -i.bak 's/<future>/\\"mingw.future.h\\"/' src/filter/kaleid0sc0pe/CMakeLists.txt # Otherwise you'd get errors like "'std::thread' has not been declared" and "invalid use of incomplete type 'class std::future<void>'".
     fi
-    do_cmake $PWD -DCMAKE_BUILD_TYPE=Release
-    do_make install/strip
+    do_cmake $PWD -DCMAKE_BUILD_TYPE=Release -DWITHOUT_OPENCV=1 -DWITHOUT_CAIRO=1 -DWITHOUT_GAVL=1 -DBUILD_TESTING=0 # None of opencv/cairo/gavl are built for the cross target; upstream now defaults to requiring all three. BUILD_TESTING=0 also skips test/CMakeLists.txt, which wants a CMake-config-package dlfcn-win32 our autotools-built one doesn't provide.
+    do_make -f Makefile install # frei0r's repo ships its own top-level 'GNUmakefile' (a ninja/build-dir wrapper); GNU Make prefers GNUmakefile over Makefile by default, silently shadowing the CMake-generated one, hence "No rule to make target 'install'" despite it existing.
 
     mkdir -p $redist_dir
     archive="$redist_dir/frei0r-plugins-$(git describe --tags | tail -c +2 | sed 's/g//')-win32-xpmod-sse"
@@ -868,7 +881,7 @@ build_libaom() {
     apply_patch $patch_dir/libaom_restore-winxp-compatibility_use-pthreads.patch -p1 # See https://aomedia.googlesource.com/aom/+/64545cb00a29ff872473db481a57cdc9bc4f1f82%5E!/#F1, https://aomedia.googlesource.com/aom/+/e5eec6c5eb14e66e2733b135ef1c405c7e6424bf%5E!/#F0 and https://github.com/sherpya/mplayer-be/blob/master/packages/aom/patches/00_sherpya_use-pthreads.diff.
     mkdir -p aom_build
     cd aom_build # Out-of-source build.
-      do_cmake ${PWD%/*} -DCMAKE_TOOLCHAIN_FILE=build/cmake/toolchains/x86-mingw-gcc.cmake -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_NASM=1 -DENABLE_TESTS=0 -DENABLE_TOOLS=0
+      do_cmake ${PWD%/*} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86-mingw-gcc.cmake -DENABLE_DOCS=0 -DENABLE_EXAMPLES=0 -DENABLE_NASM=1 -DENABLE_TESTS=0 -DENABLE_TOOLS=0 # aom dropped the 'build/' prefix from its cmake/ dir upstream.
       do_make install
     cd ..
   cd ..
@@ -882,7 +895,7 @@ build_ffmpeg() {
     apply_patch $patch_dir/0003-windows-xp-compatible-wcscp.patch -p1 # Otherwise you'd get "The procedure entry point wcscpy_s could not be located in the dynamic link library msvcrt.dll" while running ffmpeg.exe, ffplay.exe, or ffprobe.exe, because 'wcscpy()' is only available on Windows Vista and later. See https://github.com/FFmpeg/FFmpeg/commit/daf61dddc8e27424c320d5c3abe3e0c5182cd5c0.
     apply_patch $patch_dir/0004-load-shared-libfdk-aac-library-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0004-dynamic-loading-of-shared-fdk-aac-library.patch.
     apply_patch $patch_dir/0005-load-shared-frei0r-libraries-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0005-avfilters-better-behavior-of-frei0r-on-win32.patch.
-    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS")
+    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS" --extra-libs=-lssp) # '-lssp': some static deps (e.g. libmp3lame) are built with stack-protector, referencing __stack_chk_guard/__stack_chk_fail from libssp.a; without it explicitly on the link line, FFmpeg's own configure lib-detection link tests (and the final link) fail with "undefined reference".
     if [[ $1 == "shared" ]]; then
       init_options+=(--enable-shared --disable-static) # Building a static FFmpeg is the default, so no need to specify '--enable-static --disable-shared'.
     fi
@@ -913,8 +926,10 @@ build_ffmpeg() {
     else
       if [[ ! -f $archive.7z ]]; then # Pack static build.
         sed "s/$/\r/" COPYING.GPLv3 > COPYING.GPLv3.txt
-        #7z a -mx=9 -bb3 $archive.7z ffmpeg.exe ffplay.exe ffprobe.exe COPYING.GPLv3.txt # "ERROR: Can't allocate required memory!" with the Cygwin version of 7-Zip.
-        /cygdrive/c/Program\ Files/Essentials/7-Zip/7z.exe a -bb3 -mx=9 -ms=on -m0=LZMA2:d96m:fb64 $(cygpath -w $archive.7z) ffmpeg.exe ffplay.exe ffprobe.exe COPYING.GPLv3.txt
+        # The Cygwin build of p7zip has a "Can't allocate required memory!" bug, which is why upstream
+        # shells out to a native Windows 7-Zip.exe via /cygdrive instead. That path doesn't exist here
+        # (native Linux host, no Cygwin), and native Linux p7zip doesn't have that bug, so plain 7z works.
+        7z a -mx=9 -bb3 $archive.7z ffmpeg.exe ffplay.exe ffprobe.exe COPYING.GPLv3.txt
         rm -v COPYING.GPLv3.txt
       else
         echo -e "\e[1;33mAlready made '${archive##*/}.7z'.\e[0m"
@@ -925,9 +940,11 @@ build_ffmpeg() {
 
 build_dependencies() {
   build_mingw_std_threads
+  unset CFLAGS # Python/CMake/NASM are native host build tools; the WinXP-target flags (-march=pentium3 etc.) don't apply and break the native compile on 64-bit hosts ("CPU you selected does not support x86-64 instruction set").
   build_python
   build_cmake
   build_nasm
+  reset_cflags
   build_dlfcn
   build_bzip2 # Bzlib (bzip2) in FFmpeg is autodetected, so no need for --enable-bzlib.
   build_liblzma # Lzma in FFmpeg is autodetected, so no need for --enable-lzma.
@@ -1148,7 +1165,7 @@ reset_cflags() {
 cur_dir="$PWD/sandbox"
 patch_dir="${PWD%/*}/patches"
 redist_dir="${PWD%/*}/redist"
-cpu_count=1
+cpu_count=4 # Also drives every do_make's "-j $cpu_count", not just the gcc bootstrap; match this to the container's --cpus cap.
 
 set_box_memory_size_bytes
 if [[ $box_memory_size_bytes -lt 600000000 ]]; then

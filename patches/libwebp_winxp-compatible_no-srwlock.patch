@@ -1,0 +1,20 @@
+--- a/src/dsp/cpu.h
++++ b/src/dsp/cpu.h
+@@ -211,7 +211,7 @@
+ #endif
+ 
+ #if defined(WEBP_USE_THREAD)
+-#if defined(_WIN32)
++#if defined(_WIN32) && !defined(__MINGW32__)
+ #include <windows.h>
+ 
+ #if _WIN32_WINNT < 0x0600
+@@ -230,7 +230,7 @@
+     ReleaseSRWLockExclusive(&func##_lock);                 \
+   } while (0)
+ // clang-format on
+-#else  // !defined(_WIN32)
++#else  // !defined(_WIN32) || defined(__MINGW32__)
+ // NOLINTNEXTLINE
+ #include <pthread.h>
+ 

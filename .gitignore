@@ -1,0 +1,7 @@
+# Build sandbox: downloaded sources, cross-toolchain, build artifacts.
+# This is 40-60+ GB and must never be committed.
+ffmpeg_local_builds/sandbox/
+redist/
+
+# Container build context leftovers.
+*.tar

@@ -1,0 +1,38 @@
+--- a/src/utils/thread_utils.c
++++ b/src/utils/thread_utils.c
+@@ -23,7 +23,7 @@
+ 
+ #ifdef WEBP_USE_THREAD
+ 
+-#if defined(_WIN32)
++#if defined(_WIN32) && !defined(__MINGW32__)
+ 
+ #include <windows.h>
+ typedef HANDLE pthread_t;
+@@ -43,7 +43,7 @@
+ #define USE_CREATE_THREAD
+ #endif
+ 
+-#else  // !_WIN32
++#else  // !_WIN32 || defined(__MINGW32__)
+ 
+ #include <pthread.h>
+ 
+@@ -55,7 +55,7 @@
+   pthread_t thread;
+ } WebPWorkerImpl;
+ 
+-#if defined(_WIN32)
++#if defined(_WIN32) && !defined(__MINGW32__)
+ 
+ //------------------------------------------------------------------------------
+ // simplistic pthread emulation layer
+@@ -135,7 +135,7 @@
+   return !ok;
+ }
+ 
+-#else  // !_WIN32
++#else  // !_WIN32 || defined(__MINGW32__)
+ #define THREADFN void*
+ #define THREAD_RETURN(val) val
+ #endif  // _WIN32
