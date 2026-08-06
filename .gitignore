@@ -5,3 +5,6 @@ redist/
 
 # Container build context leftovers.
 *.tar
+
+# Build logs from scripts/build.sh.
+logs/
