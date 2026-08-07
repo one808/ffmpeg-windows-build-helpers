@@ -237,7 +237,11 @@ imported* symbol table. It cannot catch:
   driver, or codec-specific issues).
 
 Treat a clean audit as "very likely fine", not "guaranteed" -- an actual test
-run on a Windows XP SP3 VM remains the real verification step.
+run on real XP hardware (or a VM) remains the real verification step. As of
+2026-08-07 the `win32-core2` target has been built, audited clean (including
+via `--xp-system32=` against a real XP SP3 DLL set), **and confirmed working
+on real Windows XP SP3 32-bit hardware**. The other CPU/arch tiers in
+`scripts/build-matrix.sh` haven't been built or tested yet.
 
 ### Known flaky upstream mirrors
 
