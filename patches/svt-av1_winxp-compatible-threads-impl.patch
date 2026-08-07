@@ -1,0 +1,38 @@
+--- a/Source/Lib/Codec/svt_threads.c
++++ b/Source/Lib/Codec/svt_threads.c
+@@ -490,7 +490,7 @@
+ EbErrorType svt_create_cond_var(CondVar* cond_var) {
+     EbErrorType return_error;
+     cond_var->val = 0;
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+     InitializeCriticalSection(&cond_var->cs);
+     InitializeConditionVariable(&cond_var->cv);
+     return_error = EB_ErrorNone;
+@@ -507,7 +507,7 @@
+ */
+ EbErrorType svt_set_cond_var(CondVar* cond_var, int32_t newval) {
+     EbErrorType return_error;
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+     EnterCriticalSection(&cond_var->cs);
+     cond_var->val = newval;
+     WakeAllConditionVariable(&cond_var->cv);
+@@ -528,7 +528,7 @@
+ */
+ 
+ EbErrorType svt_wait_cond_var(CondVar* cond_var, int32_t input) {
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+ 
+     EnterCriticalSection(&cond_var->cs);
+     while (cond_var->val == input) {
+@@ -553,7 +553,7 @@
+ }
+ 
+ void svt_run_once(OnceType* once_control, OnceFn init_routine) {
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+     InitOnceExecuteOnce(once_control, init_routine, NULL, NULL);
+ #else
+     pthread_once(once_control, init_routine);

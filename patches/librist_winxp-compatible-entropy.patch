@@ -1,0 +1,40 @@
+--- a/src/crypto/random.c
++++ b/src/crypto/random.c
+@@ -12,23 +12,25 @@
+ #include "vcs_version.h"
+ 
+ #ifdef _WIN32
+-/* Seed the DRBG from BCryptGenRandom (CNG) directly. The mbedTLS-provided
+- * Windows entropy source uses the legacy CryptoAPI which is missing or
+- * unconfigured under wine and stripped-down container images (#210); going
+- * through f_rng instead of the entropy module also avoids touching any
+- * MBEDTLS_PRIVATE() internals on mbedTLS 3.x. */
++/* Seed the DRBG via the legacy CryptoAPI (CryptGenRandom) instead of BCryptGenRandom (CNG): the latter
++ * lives in bcrypt.dll, which doesn't exist before Windows Vista. advapi32's CryptoAPI has been present
++ * since Windows NT/9x and is always available and configured on a real Windows install -- the upstream
++ * comment above (kept for context) about it being "missing or unconfigured" refers to wine and
++ * stripped-down containers, not an actual Windows XP target, which is what this build is for. Also avoids
++ * touching any MBEDTLS_PRIVATE() internals on mbedTLS 3.x, same as before. */
+ #include <windows.h>
+-#include <bcrypt.h>
+-#ifndef BCRYPT_USE_SYSTEM_PREFERRED_RNG
+-#define BCRYPT_USE_SYSTEM_PREFERRED_RNG 0x00000002
+-#endif
++#include <wincrypt.h>
+ 
+ static int _librist_bcrypt_f_rng(void *data, unsigned char *output, size_t len)
+ {
+ 	(void) data;
+-	NTSTATUS s = BCryptGenRandom(NULL, output, (ULONG) len,
+-	                             BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+-	if (s != 0)
++	HCRYPTPROV provider;
++	if (!CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_FULL,
++	                         CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
++		return MBEDTLS_ERR_CTR_DRBG_ENTROPY_SOURCE_FAILED;
++	BOOL ok = CryptGenRandom(provider, (DWORD) len, output);
++	CryptReleaseContext(provider, 0);
++	if (!ok)
+ 		return MBEDTLS_ERR_CTR_DRBG_ENTROPY_SOURCE_FAILED;
+ 	return 0;
+ }

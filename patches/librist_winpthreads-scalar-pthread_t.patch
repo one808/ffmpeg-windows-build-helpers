@@ -1,0 +1,20 @@
+--- a/src/rist.c
++++ b/src/rist.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #define LIBRIST_INTERNAL 1
++#include <string.h>
+ #include "rist-private.h"
+ #include "log-private.h"
+ #include "udp-private.h"
+@@ -1826,7 +1827,8 @@
+ 		rist_log_priv3(RIST_LOG_ERROR, "rist_receiver_set_fifo_size can only be called on receiver\n");
+ 		return -2;
+ 	}
+-	if (ctx->receiver_ctx->receiver_thread)
++	static const pthread_t zero_thread;
++	if (memcmp(&ctx->receiver_ctx->receiver_thread, &zero_thread, sizeof(pthread_t)) != 0)
+ 	{
+ 		rist_log_priv2(ctx->receiver_ctx->common.logging_settings, RIST_LOG_ERROR, "rist_receiver_set_fifo_size must be called before starting\n");
+ 		return -3;

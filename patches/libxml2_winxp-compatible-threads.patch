@@ -1,0 +1,11 @@
+--- a/include/private/threads.h
++++ b/include/private/threads.h
+@@ -4,7 +4,7 @@
+ #include <libxml/threads.h>
+ 
+ #ifdef LIBXML_THREAD_ENABLED
+-  #ifdef _WIN32
++  #if defined(_WIN32) && !defined(__MINGW32__)
+     #define WIN32_LEAN_AND_MEAN
+     #ifdef _WIN32_WINNT
+       #if _WIN32_WINNT < 0x0600

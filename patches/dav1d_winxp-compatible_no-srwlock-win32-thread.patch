@@ -1,0 +1,11 @@
+--- a/src/win32/thread.c
++++ b/src/win32/thread.c
+@@ -27,7 +27,7 @@
+ 
+ #include "config.h"
+ 
+-#if defined(_WIN32)
++#if defined(_WIN32) && !defined(__MINGW32__)
+ 
+ #include <process.h>
+ #include <stdlib.h>

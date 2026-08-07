@@ -1,0 +1,46 @@
+--- a/dict.c
++++ b/dict.c
+@@ -891,7 +891,7 @@
+ #ifdef _WIN32
+   #define WIN32_LEAN_AND_MEAN
+   #include <windows.h>
+-  #include <bcrypt.h>
++  #include <wincrypt.h>
+ #else
+   #if HAVE_DECL_GETENTROPY
+     /* POSIX 2024 */
+@@ -917,20 +917,22 @@
+ 
+     {
+ #ifdef _WIN32
+-        NTSTATUS status;
+-
+         /*
+-         * You can find many (recent as of 2025) discussions how
+-         * to get a pseudo-random seed on Windows in projects like
+-         * Golang, Rust, Chromium and Firefox.
+-         *
+-         * TODO: Support ProcessPrng available since Windows 10.
++         * BCryptGenRandom (bcrypt.dll / CNG) doesn't exist before Windows Vista. Use the legacy
++         * CryptoAPI (advapi32/CryptGenRandom) instead, available since Windows NT/9x -- same fix as
++         * mbedTLS's and librist's own entropy sources elsewhere in this XP-targeted build.
+          */
+-        status = BCryptGenRandom(NULL, (unsigned char *) globalRngState,
+-                                 sizeof(globalRngState),
+-                                 BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+-        if (!BCRYPT_SUCCESS(status))
+-            xmlAbort("libxml2: BCryptGenRandom failed with error code %lu\n",
++        HCRYPTPROV provider;
++        BOOL ok = FALSE;
++
++        if (CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_FULL,
++                                CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {
++            ok = CryptGenRandom(provider, sizeof(globalRngState),
++                                (unsigned char *) globalRngState);
++            CryptReleaseContext(provider, 0);
++        }
++        if (!ok)
++            xmlAbort("libxml2: CryptGenRandom failed with error code %lu\n",
+                      GetLastError());
+ #else
+         int var;

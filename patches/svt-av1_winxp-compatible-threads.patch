@@ -1,0 +1,29 @@
+--- a/Source/Lib/Codec/svt_threads.h
++++ b/Source/Lib/Codec/svt_threads.h
+@@ -63,6 +63,8 @@
+ #endif
+ #include <sched.h>
+ #include <pthread.h>
++#elif defined(__MINGW32__)
++#include <pthread.h> // Needed below for pthread_mutex_t/pthread_cond_t/pthread_once_t (MinGW-XP CondVar/OnceType path).
+ #endif
+ #define EB_CREATE_THREAD_NAMED(pointer, thread_function, thread_context, name) \
+     do {                                                                       \
+@@ -110,7 +112,7 @@
+ */
+ typedef struct CondVar {
+     int32_t val;
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+     CRITICAL_SECTION   cs;
+     CONDITION_VARIABLE cv;
+ #else
+@@ -124,7 +126,7 @@
+ EbErrorType svt_create_cond_var(CondVar* cond_var);
+ 
+ // once related functions and macros
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+ typedef INIT_ONCE OnceType;
+ #define ONCE_INIT INIT_ONCE_STATIC_INIT
+ #define ONCE_ROUTINE(name) BOOL CALLBACK name(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContext)

@@ -94,8 +94,8 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
   `original_cflags` in `cross_compile_ffmpeg.sh`), **do not** just
   `rm -rf ffmpeg_local_builds/sandbox/win32` -- that deletes the `.git`
   checkouts too and forces every dependency to be re-cloned from scratch
-  (~30 repositories, some large: FFmpeg itself, x265, aom, libjxl +
-  submodules, AviSynthPlus, libvpx, libwebp, ...). For those, force a
+  (~50 git repositories, some large: FFmpeg itself, x265, aom, libjxl +
+  submodules, AviSynthPlus, libvpx, libwebp, SVT-AV1, ...). For those, force a
   recompile *without* re-cloning instead:
   ```sh
   # inside a throwaway container, since the sandbox is root-owned:
@@ -126,6 +126,29 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
 upstream default (`-march=pentium3 -mtune=athlon-xp -msse`) is far more
 conservative (SSE-only, no SSE2) and only makes sense if you're actually
 targeting a pre-SSE2 CPU.
+
+### Dependency versions
+
+This build pulls in **63 third-party libraries** on top of FFmpeg itself (codecs,
+containers, filters, TLS, fonts, ...) aiming for a "full" module list comparable to
+mainstream builds like BtbN's -- minus anything that needs Vista+ APIs or a modern
+GPU (Vulkan, D3D11VA/D3D12VA, AMF, NVENC/QSV), which are out of scope for a
+Windows XP target by definition.
+
+Every dependency is pinned to a specific commit (or tarball version), not a
+floating branch -- see [`DEPENDENCY_VERSIONS.md`](DEPENDENCY_VERSIONS.md) for
+the full table: what's pinned, when it was pinned, what's newest upstream, and
+why anything that isn't bleeding-edge is that way (frozen/legacy upstream,
+mirror lag, or a deliberate compatibility pin). SSL/TLS (mbedTLS, used for
+FFmpeg's own HTTPS support) is kept current as a priority.
+
+A handful of dependencies needed source patches beyond the version pin to stay
+XP-compatible -- most commonly a library unconditionally using a Windows
+Vista+-only API (`SRWLOCK`/`CONDITION_VARIABLE`/`InitOnce*`/`BCryptGenRandom`)
+in its Windows code path instead of falling back to the POSIX `pthread`/legacy
+CryptoAPI path this build already provides via `pthreads-win32`. All such
+patches live in `patches/` and are referenced from the relevant `build_X()`
+function in `cross_compile_ffmpeg.sh` with a comment explaining the issue.
 
 ### What this doesn't catch
 

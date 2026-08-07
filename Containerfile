@@ -36,6 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     libssl-dev \
+    meson \
+    ninja-build \
+    nasm \
+    gettext \
+    autopoint \
     && rm -rf /var/lib/apt/lists/*
 
 # check_missing_packages() in cross_compile_ffmpeg.sh writes an RPM-style

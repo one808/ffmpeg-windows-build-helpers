@@ -253,6 +253,28 @@ do_cmake() {
   fi
 }
 
+do_meson() { # $1: source dir, "$@" (rest): extra meson options. Run from the desired (out-of-source) build dir.
+  local source_dir=$1
+  shift
+  local meson_options=(--prefix=$mingw_w64_x86_64_prefix --libdir=lib --default-library=static --buildtype=release --cross-file=$meson_cross_file "$@")
+  local name=$(get_small_touchfile_name already_ran_meson "${meson_options[@]}" "$source_dir")
+  if [ ! -f $name ]; then
+    echo -e "\e[1;33mConfiguring ${source_dir##*/} as \"meson setup ${meson_options[@]} . $source_dir\".\e[0m"
+    meson setup "${meson_options[@]}" . "$source_dir" || exit 1
+    touch $name || exit 1
+  fi
+}
+
+do_ninja_install() {
+  local name=$(get_small_touchfile_name already_ran_ninja "$@")
+  if [ ! -f $name ]; then
+    echo -e "\e[1;33mCompiling and installing ${PWD%/*} as \"ninja $@ && ninja install\".\e[0m"
+    ninja "$@" || exit 1
+    ninja install || exit 1
+    touch $name || exit 1
+  fi
+}
+
 do_make() {
   local dir="${PWD/$cur_dir\/win32\/}"
   local make_options=(-j $cpu_count "$@")
@@ -328,7 +350,7 @@ gen_ld_script() {
 } # gen_ld_script libxxx.a -lxxx
 
 build_mingw_std_threads() {
-  do_git_checkout https://github.com/meganz/mingw-std-threads.git
+  do_git_checkout https://github.com/meganz/mingw-std-threads.git "" "" c931bac289dd431f1dd30fc4a5d1a7be36668073
   cd mingw-std-threads_git
     for header in *.h; do
       install -m644 ${header} ${mingw_w64_x86_64_prefix}/include/${header}
@@ -367,7 +389,7 @@ build_nasm() {
 }
 
 build_dlfcn() {
-  do_git_checkout https://github.com/dlfcn-win32/dlfcn-win32.git
+  do_git_checkout https://github.com/dlfcn-win32/dlfcn-win32.git "" "" 8bfddb5aa345ce10ba98e925acbc7bfb53639679
   cd dlfcn-win32_git
     if [[ ! -f Makefile.bak ]]; then # Change GCC optimization level.
       sed -i.bak "s/CFLAGS =/CFLAGS +=/;s/-O3/-O2/" Makefile
@@ -392,16 +414,16 @@ build_bzip2() {
 }
 
 build_liblzma() {
-  download_and_unpack_file https://sourceforge.net/projects/lzmautils/files/xz-5.6.2.tar.xz
-  cd xz-5.6.2
+  download_and_unpack_file https://sourceforge.net/projects/lzmautils/files/xz-5.8.3.tar.xz
+  cd xz-5.8.3
     generic_configure --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-doc --disable-nls
     do_make install
   cd ..
 } # [dlfcn]
 
 build_zlib() {
-  download_and_unpack_file https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz # zlib.net dropped the 1.3.1 tarball (site only serves 1.3 and 1.3.2 now, not even under /fossils).
-  cd zlib-1.3.1
+  download_and_unpack_file https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz # zlib.net doesn't reliably serve older point releases (site only serves the latest 1-2 versions, not even under /fossils).
+  cd zlib-1.3.2
     if [[ ! -f Makefile.in.bak ]]; then # Library only.
       sed -i.bak "/man3dir/d" Makefile.in
     fi
@@ -415,16 +437,16 @@ build_zlib() {
 }
 
 build_iconv() {
-  download_and_unpack_file https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.17.tar.gz
-  cd libiconv-1.17
+  download_and_unpack_file https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.tar.gz
+  cd libiconv-1.19
     generic_configure --disable-nls
     do_make install-lib # No need for 'do_make_install', because 'install-lib' already has install-instructions.
   cd ..
 } # [dlfcn]
 
 build_sdl2() {
-  download_and_unpack_file https://libsdl.org/release/SDL2-2.30.6.tar.gz
-  cd SDL2-2.30.6
+  download_and_unpack_file https://libsdl.org/release/SDL2-2.32.10.tar.gz
+  cd SDL2-2.32.10
     if [[ ! -f Makefile.in.bak ]]; then
       sed -i.bak "/aclocal/d" Makefile.in # Library only.
       sed -i.bak "/#ifndef DECLSPEC/i\#define DECLSPEC" include/begin_code.h # Needed for building shared FFmpeg libraries.
@@ -438,7 +460,7 @@ build_sdl2() {
 } # [iconv, dlfcn]
 
 build_libwebp() {
-  do_git_checkout https://chromium.googlesource.com/webm/libwebp.git libwebp_git main
+  do_git_checkout https://chromium.googlesource.com/webm/libwebp.git libwebp_git main 506cf14d5fe7f5d908b25ea01e72270052cc82dc
   cd libwebp_git
     apply_patch $patch_dir/libwebp_winxp-compatible_no-srwlock.patch -p1 # src/dsp/cpu.h hard-#errors below Vista because its threaded DSP-init lazy-lock uses SRWLOCK; MinGW already links winpthreads, so just route it onto the existing (already XP-safe) pthread_mutex_t branch instead of the native-Win32 one.
     apply_patch $patch_dir/libwebp_winxp-compatible_no-srwlock-thread-utils.patch -p1 # src/utils/thread_utils.c has its own SRWLOCK-based "simplistic pthread emulation" for _WIN32 (also Vista+ only); route MinGW onto its existing '#include <pthread.h>' branch instead, same reasoning as above.
@@ -451,7 +473,7 @@ build_libwebp() {
 } # [dlfcn]
 
 build_libjxl() {
-  do_git_checkout https://github.com/libjxl/libjxl.git libjxl_git main
+  do_git_checkout https://github.com/libjxl/libjxl.git libjxl_git main e8ff09762481785938d8e4e01333ed3917571161
   cd libjxl_git
     if [[ ! -d .git/modules ]]; then
       echo -e "\e[1;33mDownloading submodules.\e[0m" # 'Brotli' and 'skcms' are the main focus.
@@ -477,7 +499,12 @@ build_libjxl() {
     fi
     mkdir -p build_dir
     cd build_dir # Out-of-source build.
-      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=0 -DBUILD_TESTING=0 -DCMAKE_BUILD_TYPE=Release -DJPEGXL_ENABLE_BENCHMARK=0 -DJPEGXL_ENABLE_DOXYGEN=0 -DJPEGXL_ENABLE_EXAMPLES=0 -DJPEGXL_ENABLE_JNI=0 -DJPEGXL_ENABLE_JPEGLI=0 -DJPEGXL_ENABLE_JPEGLI_LIBJPEG=0 -DJPEGXL_ENABLE_MANPAGES=0 -DJPEGXL_ENABLE_OPENEXR=0 -DJPEGXL_ENABLE_SJPEG=0 -DJPEGXL_ENABLE_TOOLS=0
+      # -D_WIN32_WINNT=0x0501/-DWINVER=0x0501 (XP): without an explicit value, mingw-std-threads' own
+      # mingw.condition_variable.h (used above) picks its 'vista::condition_variable' implementation
+      # (native CONDITION_VARIABLE / SleepConditionVariableCS, Vista+ only) purely based on this macro's
+      # default from the MinGW headers -- it already has a complete, tested XP-safe 'xp::condition_variable'
+      # (semaphore+event based) that activates automatically once this is set correctly; no source patch needed.
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=0 -DBUILD_TESTING=0 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS -D_WIN32_WINNT=0x0501 -DWINVER=0x0501" -DCMAKE_CXX_FLAGS="$CFLAGS -D_WIN32_WINNT=0x0501 -DWINVER=0x0501" -DJPEGXL_ENABLE_BENCHMARK=0 -DJPEGXL_ENABLE_DOXYGEN=0 -DJPEGXL_ENABLE_EXAMPLES=0 -DJPEGXL_ENABLE_JNI=0 -DJPEGXL_ENABLE_JPEGLI=0 -DJPEGXL_ENABLE_JPEGLI_LIBJPEG=0 -DJPEGXL_ENABLE_MANPAGES=0 -DJPEGXL_ENABLE_OPENEXR=0 -DJPEGXL_ENABLE_SJPEG=0 -DJPEGXL_ENABLE_TOOLS=0
       if [[ ! -f lib/include/jxl/jxl_export.h.bak ]]; then
         sed -i.bak "s/ __declspec(dll.*//" lib/include/jxl/jxl_export.h # Otherwise you'd get "undefined reference to `_imp__JxlDecoderVersion'" while configuring FFmpeg.
       fi
@@ -487,8 +514,8 @@ build_libjxl() {
 } # python 3
 
 build_freetype() {
-  download_and_unpack_file https://sourceforge.net/projects/freetype/files/freetype2/2.13.3/freetype-2.13.3.tar.xz/download freetype-2.13.3 # savannah.gnu.org started returning persistent 502s for this file; SourceForge's URL ends in '/download', not the filename, so pass the dir explicitly.
-  cd freetype-2.13.3
+  download_and_unpack_file https://sourceforge.net/projects/freetype/files/freetype2/2.14.3/freetype-2.14.3.tar.xz/download freetype-2.14.3 # savannah.gnu.org started returning persistent 502s for this file; SourceForge's URL ends in '/download', not the filename, so pass the dir explicitly.
+  cd freetype-2.14.3
     if [[ ! -f builds/unix/install.mk.bak ]]; then
       sed -i.bak "/config \\\/s/\s*\\\//;/bindir) /s/\s*\\\//;/aclocal/d;/man1/d;/PLATFORM_DIR/d;/docs/d" builds/unix/install.mk # Library only.
     fi
@@ -501,19 +528,27 @@ build_freetype() {
 } # [zlib, bzip2, libpng]
 
 build_libxml2() {
-  download_and_unpack_file http://xmlsoft.org/sources/libxml2-2.9.12.tar.gz
-  cd libxml2-2.9.12
-    apply_patch $patch_dir/libxml2-2.9.12_lib-only_static_cve-2017-8872.diff # See https://github.com/sherpya/mplayer-be/blob/master/packages/libxml2/patches/01_sherpya_always-static.diff and https://github.com/sherpya/mplayer-be/blob/master/packages/libxml2/patches/03_debian_cve-2017-8872.diff.
-    generic_configure --with-ftp=no --with-http=no --with-python=no
+  download_and_unpack_file https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.3.tar.xz # xmlsoft.org no longer serves current releases.
+  cd libxml2-2.15.3
+    # The old lib-only/static Makefile.in patch was hand-rolled against 2.9.12's *generated* Makefile.in
+    # (not configure.ac), so it doesn't apply to a different version at all; its CVE-2017-8872 fix has long
+    # since been merged upstream anyway. --with-ftp/--with-http/--with-python=no below already skip the extras.
+    apply_patch $patch_dir/libxml2_winxp-compatible-threads.patch -p1 # include/private/threads.h unconditionally selects native Win32 threading (CRITICAL_SECTION-only, no CONDITION_VARIABLE actually used here, but it also force-bumps _WIN32_WINNT to at least Vista as a side effect) whenever _WIN32 is defined, regardless of pthread.h availability. Route MinGW onto the POSIX pthread branch instead (real pthreads-win32, already linked elsewhere in this build), same reasoning as the dav1d patches.
+    apply_patch $patch_dir/libxml2_winxp-compatible-entropy.patch -p1 # dict.c's xmlInitRandom() calls BCryptGenRandom (bcrypt.dll / CNG) unconditionally on _WIN32 -- Vista+ only. Switch to the legacy CryptoAPI (CryptGenRandom), same fix as mbedtls's and librist's own entropy sources.
+    LDFLAGS=-pthread generic_configure --with-ftp=no --with-http=no --with-python=no # Now that threads.h (patched above) routes to real pthreads-win32, both libxml2.a itself and its bundled xmllint/xmlcatalog tools need '-pthread' on the link line -- same story as libssh/librist/dav1d's own '-pthread' fixes elsewhere in this build.
     do_make install
   cd ..
 } # [zlib, liblzma, iconv, dlfcn]
 
 build_fontconfig() {
-  download_and_unpack_file https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.xz
-  cd fontconfig-2.15.0
+  download_and_unpack_file https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.16.0.tar.xz # 2.18.x exists as a git tag but was never packaged as an official release tarball; 2.16.0 is the newest one actually published.
+  cd fontconfig-2.16.0
     if [[ ! -f Makefile.in.bak ]]; then
-      sed -i.bak "/^SUBDIRS/s/fc.*/src/;470,471d;/^install-data-am/s/:.*/: install-pkgconfigDATA/;/\tinstall-xmlDATA$/d" Makefile.in # Library only.
+      cp Makefile.in Makefile.in.bak
+      # Library only: collapse the (possibly backslash-continued, so plain sed line-ranges aren't safe across
+      # versions) SUBDIRS list down to just fontconfig+src, and drop the doc/man/xml install targets.
+      perl -0777 -pi -e 's/^SUBDIRS = .*?[^\\]\n/SUBDIRS = fontconfig src\n/ms' Makefile.in
+      sed -i "/^install-data-am/s/:.*/: install-pkgconfigDATA/;/\tinstall-xmlDATA$/d" Makefile.in
     fi
     generic_configure --enable-libxml2 --disable-docs # Use Libxml2 instead of Expat.
     do_make install
@@ -532,9 +567,19 @@ build_gmp() {
 } # [dlfcn]
 
 build_mbedtls() {
-  download_and_unpack_file https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v2.28.9.tar.gz mbedtls-2.28.9
-  cd mbedtls-2.28.9
-    apply_patch $patch_dir/mbedtls-2.28.9_mingw-stdio.diff # Windows XP compatibility. See https://github.com/sherpya/mplayer-be/blob/master/packages/mbedtls/patches/00_sherpya_mingw-stdio.diff.
+  # 2.28 is the old LTS branch (essentially EOL); 3.6.x is the current stable/LTS-ish line. mbedTLS 4.x
+  # also exists now but is very new (first 4.0 release was recent) -- staying one line behind on purpose.
+  # A plain tarball doesn't work as of 3.6: CMakeLists.txt itself (not just the tests) now hard-requires the
+  # 'framework' and 'tf-psa-crypto' git submodules ("mbedtls_framework" Python module / CMakeLists.txt not
+  # found "and does not appear to be a git checkout"), so this needs an actual git checkout with submodules.
+  do_git_checkout https://github.com/Mbed-TLS/mbedtls.git mbedtls_git mbedtls-3.6 627361b09e6f6e3eac756297a370a591cf310ab9 # mbedtls-3.6.7. Point-release tags live on the mbedtls-3.6 maintenance branch, not main/master.
+  cd mbedtls_git
+    if [[ ! -d framework/.git ]]; then
+      echo -e "\e[1;33mDownloading mbedtls submodules.\e[0m"
+      git submodule update --init framework # tf-psa-crypto doesn't exist as a submodule on the mbedtls-3.6 branch (only on newer/main), so just 'framework' here.
+    fi
+    apply_patch $patch_dir/mbedtls-2.28.9_mingw-stdio.diff # Windows XP compatibility; see if this 2.28-era patch (platform.h snprintf/vsnprintf conflict) still applies as-is to 3.6's platform.h.
+    apply_patch $patch_dir/mbedtls-3.6.7_winxp-compatible-entropy.diff # library/entropy_poll.c unconditionally uses BCryptGenRandom (bcrypt.dll / CNG), which doesn't exist before Vista; switch to the legacy CryptoAPI (advapi32/CryptGenRandom), same fix pattern as libavutil/random_seed.c's own bcrypt-optional patch.
     mkdir -p build_dir
     cd build_dir # Out-of-source build.
       do_cmake ${PWD%/*} -DCMAKE_C_FLAGS="$CFLAGS -D__USE_MINGW_ANSI_STDIO=1" -DENABLE_PROGRAMS=0 -DENABLE_TESTING=0 -DENABLE_ZLIB_SUPPORT=1
@@ -544,7 +589,7 @@ build_mbedtls() {
 }
 
 build_libogg() {
-  do_git_checkout https://github.com/xiph/ogg.git
+  do_git_checkout https://github.com/xiph/ogg.git "" main 06a5e0262cdc28aa4ae6797627a783b5010440f0 # Xiph's repos default to 'main', not 'master'.
   cd ogg_git
     if [[ ! -f Makefile.am.bak ]]; then # Library only.
       sed -i.bak "s/ doc//;/m4data/,+2d" Makefile.am
@@ -555,7 +600,7 @@ build_libogg() {
 } # [dlfcn]
 
 build_libvorbis() {
-  do_git_checkout https://github.com/xiph/vorbis.git
+  do_git_checkout https://github.com/xiph/vorbis.git "" main 1b75110b5a2754ba1931d82dd83cb822b266a21d # Xiph's repos default to 'main', not 'master'.
   cd vorbis_git
     if [[ ! -f Makefile.am.bak ]]; then
       sed -i.bak "s/ test doc//;/m4data/,+2d" Makefile.am # Library only.
@@ -567,7 +612,7 @@ build_libvorbis() {
 } # libogg >= 1.0, [dlfcn]
 
 build_libopus() {
-  do_git_checkout https://github.com/xiph/opus.git opus_git main
+  do_git_checkout https://github.com/xiph/opus.git opus_git main 3da9f7a6db1c05c3996cb363a9d1931a978bf1be
   cd opus_git
     if [[ ! -f Makefile.am.bak ]]; then
       sed -i.bak "/m4data/,+2d;/install-data-local/,+2d" Makefile.am # Library only.
@@ -580,7 +625,7 @@ build_libopus() {
 } # [dlfcn]
 
 build_lame() {
-  do_svn_checkout https://svn.code.sf.net/p/lame/svn/trunk/lame lame_svn
+  do_svn_checkout https://svn.code.sf.net/p/lame/svn/trunk/lame lame_svn 6751 # Pinned for reproducibility, unlike most git deps here which float to a specific commit rather than a moving branch tip -- trunk itself has no release tags to pin to instead.
   cd lame_svn
     if [[ ! -f Makefile.in.bak ]]; then # Library only.
       sed -i.bak "/^SUBDIRS/s/ frontend//;/^SUBDIRS/s/ doc//" Makefile.in
@@ -591,7 +636,7 @@ build_lame() {
 } # [dlfcn]
 
 build_twolame() {
-  do_git_checkout https://github.com/njh/twolame.git twolame_git main
+  do_git_checkout https://github.com/njh/twolame.git twolame_git main 6fced852d4d5cfad58cf9dbe3ea619b08e87d398
   cd twolame_git
     if [[ ! -f Makefile.am.bak ]]; then # Library only.
       sed -i.bak "/^SUBDIRS/s/ frontend.*//;/pkgdocdir/,+6d;/pkgdoc_DATA/d" Makefile.am
@@ -603,7 +648,7 @@ build_twolame() {
 } # [dlfcn]
 
 build_fdk-aac() {
-  do_git_checkout https://github.com/mstorsjo/fdk-aac.git
+  do_git_checkout https://github.com/mstorsjo/fdk-aac.git "" "" d8e6b1a3aa606c450241632b64b703f21ea31ce3
   cd fdk-aac_git
     do_configure --host=$host_target --prefix=$mingw_w64_x86_64_prefix --disable-static # Build shared library ('libfdk-aac-2.dll').
     do_make install-strip
@@ -645,7 +690,7 @@ build_libopenmpt() {
 # GCC11's own std::thread implementation conflicts with mingw-std-threads resulting in "libopenmpt/libopenmpt_impl.cpp:85:2: warning: #warning "Warning: Building libopenmpt with MinGW-w64 without std::thread support is not recommended and is deprecated. Please use MinGW-w64 with posix threading model (as opposed to win32 threading model), or build with mingw-std-threads." [-Wcpp]". See https://forum.openmpt.org/index.php?topic=6822.0.
 
 build_libgme() {
-  do_git_checkout https://github.com/libgme/game-music-emu.git
+  do_git_checkout https://github.com/libgme/game-music-emu.git "" "" fe8da4b6d3876d7542c2fb69d94487e19836d678
   cd game-music-emu_git
     if [[ ! -f CMakeLists.txt.bak ]]; then
       sed -i.bak "/EXCLUDE_FROM_ALL/d" CMakeLists.txt # Library only.
@@ -657,7 +702,7 @@ build_libgme() {
 } # zlib
 
 build_libsoxr() {
-  do_git_checkout https://git.code.sf.net/p/soxr/code soxr_git
+  do_git_checkout https://git.code.sf.net/p/soxr/code soxr_git "" 945b592b70470e29f917f4de89b4281fbbd540c0
   cd soxr_git
     if [[ ! -f CMakeLists.txt.bak ]]; then # Library only.
       sed -i.bak "/^install/,+5d" CMakeLists.txt
@@ -678,7 +723,7 @@ build_libflite() {
 }
 
 build_libsamplerate() {
-  do_git_checkout https://github.com/libsndfile/libsamplerate.git
+  do_git_checkout https://github.com/libsndfile/libsamplerate.git "" "" 2ccde9568cca73c7b32c97fefca2e418c16ae5e3
   cd libsamplerate_git
     if [[ ! -f Makefile.am.bak ]]; then # Library only.
       sed -i.bak "53,\$d" Makefile.am
@@ -700,16 +745,21 @@ build_fftw() {
 }
 
 build_librubberband() {
-  do_git_checkout https://github.com/breakfastquay/rubberband.git rubberband_git default 18c06ab8c431854056407c467f4755f761e36a8e
+  do_git_checkout https://github.com/breakfastquay/rubberband.git rubberband_git default e4296ac80b1170018a110bc326fd0d45a0eb27d6 # Was stuck on a Feb-2021 commit (3 major versions behind); bumped past the v4.0.0 tag to current branch tip.
   cd rubberband_git
-    apply_patch $patch_dir/rubberband_git_static-lib.patch -p1 # Create install-static target and add missing libraries in the pkg-config file.
-    do_configure --host=$host_target --prefix=$mingw_w64_x86_64_prefix --disable-programs --disable-vamp --disable-ladspa
-    do_make install-static # No need for 'do_make_install', because 'install-static' already has install-instructions.
+    # Meson-only as of v4.x (no more configure/Makefile.in) -- same story as libbluray/libdvdread/libdvdnav
+    # elsewhere in this build. The old rubberband_git_static-lib.patch (hand-rolled against the old Makefile.in)
+    # no longer applies and isn't needed: meson already has a proper static-lib + pkg-config install path.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Dfft=fftw -Dresampler=libsamplerate -Dladspa=disabled -Dlv2=disabled -Dvamp=disabled -Dcmdline=disabled -Dtests=disabled -Djni=disabled # Reuse the fftw/libsamplerate already built above instead of rubberband's builtin fallbacks.
+      do_ninja_install
+    cd ..
   cd ..
 } # libsamplerate, fftw
 
 build_libzimg() {
-  do_git_checkout https://github.com/sekrit-twc/zimg.git
+  do_git_checkout https://github.com/sekrit-twc/zimg.git "" "" f6cc75ad23db1bb9c53673c15523e6b6e960ffc6
   cd zimg_git
     if [[ ! -d .git/modules ]]; then
       echo -e "\e[1;33mDownloading submodule 'graphengine'.\e[0m"
@@ -734,7 +784,7 @@ build_libzimg() {
 } # [dlfcn]
 
 build_vidstab() {
-  do_git_checkout https://github.com/georgmartius/vid.stab.git
+  do_git_checkout https://github.com/georgmartius/vid.stab.git "" "" b85fa835351c9eeddd4364153600dcd43ccc3745
   cd vid.stab_git
     do_cmake $PWD -DBUILD_SHARED_LIBS=0 -DUSE_OMP=0 # '-DUSE_OMP' is on by default, but somehow libgomp ('cygwin_local_install/lib/gcc/i686-pc-cygwin/5.4.0/include/omp.h') can't be found, so '-DUSE_OMP=0' to prevent a compilation error.
     do_make install
@@ -742,7 +792,7 @@ build_vidstab() {
 }
 
 build_frei0r() {
-  do_git_checkout https://github.com/dyne/frei0r.git
+  do_git_checkout https://github.com/dyne/frei0r.git "" "" 253addfd4bea3c90b0bf765589ca28ea18f3ddc0
   cd frei0r_git
     if [[ ! -f src/filter/kaleid0sc0pe/kaleid0sc0pe.cpp.bak ]]; then
       sed -i.bak 's/<future>/"mingw.future.h"/' src/filter/kaleid0sc0pe/kaleid0sc0pe.cpp # Use "mingw-std-threads" implementation of standard C++11 threading classes, which are currently still missing on MinGW GCC.
@@ -766,7 +816,7 @@ build_frei0r() {
 } # dlfcn
 
 build_fribidi() {
-  do_git_checkout https://github.com/behdad/fribidi.git
+  do_git_checkout https://github.com/behdad/fribidi.git "" "" 069a7e3d31e6aa74f2068a8e0804106ce7906639
   cd fribidi_git
     if [[ ! -f Makefile.am.bak ]]; then
       sed -i.bak "s/ bin doc test//" Makefile.am # Library only.
@@ -778,8 +828,8 @@ build_fribidi() {
 } # [dlfcn]
 
 build_harfbuzz() {
-  download_and_unpack_file https://github.com/harfbuzz/harfbuzz/archive/refs/tags/9.0.0.tar.gz harfbuzz-9.0.0
-  cd harfbuzz-9.0.0
+  download_and_unpack_file https://github.com/harfbuzz/harfbuzz/archive/refs/tags/14.3.0.tar.gz harfbuzz-14.3.0
+  cd harfbuzz-14.3.0
     sed -i.bak "s|setlocale|//setlocale|" util/options.hh # See https://github.com/sherpya/mplayer-be/blob/master/packages/harfbuzz/patches/01_sherpya_no-setlocale.diff.
     mkdir -p build_dir
     cd build_dir # Out-of-source build.
@@ -790,7 +840,7 @@ build_harfbuzz() {
 } # [freetype]
 
 build_libass() {
-  do_git_checkout https://github.com/libass/libass.git
+  do_git_checkout https://github.com/libass/libass.git "" "" 89cc0f4e450d64f74281a17d7f11ed05229665e8
   cd libass_git
     generic_configure --disable-directwrite
     # See https://github.com/libass/libass/blob/master/Changelog, libass (0.13.0): "The DirectWrite backend only works on Windows Vista and later. On XP, fontconfig is still needed.".
@@ -803,7 +853,7 @@ build_libass() {
 } # freetype >= 9.10.3 (see https://bugs.launchpad.net/ubuntu/+source/freetype1/+bug/78573 o_O), fribidi >= 0.19.0, harfbuzz >= 1.2.3, [fontconfig >= 2.10.92, iconv, dlfcn]
 
 build_avisynth() {
-  do_git_checkout https://github.com/AviSynth/AviSynthPlus.git
+  do_git_checkout https://github.com/AviSynth/AviSynthPlus.git "" "" cfdaf8eb8a0a05b14edf7e73736df382bb876592
   mkdir -p AviSynthPlus_git/avisynth-build
   cd AviSynthPlus_git/avisynth-build # Out-of-source build.
     do_cmake ${PWD%/*} -DHEADERS_ONLY=1
@@ -821,7 +871,7 @@ build_libxvid() {
 }
 
 build_libx264() {
-  do_git_checkout https://code.videolan.org/videolan/x264.git
+  do_git_checkout https://code.videolan.org/videolan/x264.git "" "" 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
   cd x264_git
     if [[ ! -f configure.bak ]]; then # Change GCC optimization level.
       sed -i.bak "s/O3 -/O2 -/" configure
@@ -832,7 +882,7 @@ build_libx264() {
 } # nasm >= 2.13 (unless '--disable-asm' is specified)
 
 build_libx265() {
-  do_git_checkout https://bitbucket.org/multicoreware/x265_git.git x265_git
+  do_git_checkout https://bitbucket.org/multicoreware/x265_git.git x265_git "" b81f650e21e8aacbe6a9ad04ce14aefc05b932c0
   cd x265_git
     if [[ ! -f source/CMakeLists.txt.bak ]]; then # Fix "noasm". See https://github.com/rdp/ffmpeg-windows-build-helpers/pull/738.
       sed -i.bak "s/if(X86MATCH GREATER \"-1\")/if(\"\${SYSPROC}\" STREQUAL \"\" OR X86MATCH GREATER \"-1\")/" source/CMakeLists.txt
@@ -865,7 +915,7 @@ EOF
 } # nasm >= 2.13 (unless '-DENABLE_ASSEMBLY=0' is specified)
 
 build_libvpx() {
-  do_git_checkout https://chromium.googlesource.com/webm/libvpx.git libvpx_git main
+  do_git_checkout https://chromium.googlesource.com/webm/libvpx.git libvpx_git main 251f0168c042861763f73b744f0b3583c70431a2
   cd libvpx_git
     if [[ ! -f vp8/common/threading.h.bak ]]; then
       sed -i.bak "/<semaphore.h/i\#include <sys/types.h>" vp8/common/threading.h # With 'cross_compilers/mingw-w64-i686/include/semaphore.h' you'd otherwise get: "semaphore.h:152:8: error: unknown type name 'mode_t'".
@@ -876,7 +926,7 @@ build_libvpx() {
 }
 
 build_libaom() {
-  do_git_checkout https://aomedia.googlesource.com/aom libaom_git main
+  do_git_checkout https://aomedia.googlesource.com/aom libaom_git main 01fd4524390f5230b22e9449a79d5df5a1b76dc4
   cd libaom_git
     apply_patch $patch_dir/libaom_restore-winxp-compatibility_use-pthreads.patch -p1 # See https://aomedia.googlesource.com/aom/+/64545cb00a29ff872473db481a57cdc9bc4f1f82%5E!/#F1, https://aomedia.googlesource.com/aom/+/e5eec6c5eb14e66e2733b135ef1c405c7e6424bf%5E!/#F0 and https://github.com/sherpya/mplayer-be/blob/master/packages/aom/patches/00_sherpya_use-pthreads.diff.
     mkdir -p aom_build
@@ -888,20 +938,28 @@ build_libaom() {
 } # cmake >= 3.5
 
 build_ffmpeg() {
-  do_git_checkout https://github.com/FFmpeg/FFmpeg.git "" "" 6aafe61285404022b1e8e882b8a875bc33a93aec
+  do_git_checkout https://github.com/FFmpeg/FFmpeg.git "" release/8.1 1c2c67c0b9f7f66ab32c19dcf7f227bcd290aa4c # n8.1.2. Note: release tags live on their own release/X.Y branch, not master -- that's why the branch arg matters here.
   cd FFmpeg_git
     apply_patch $patch_dir/0001-make-bcrypt-optional.patch -p1 # WinXP doesn't have 'bcrypt'. See https://github.com/FFmpeg/FFmpeg/commit/aedbf1640ced8fc09dc980ead2a387a59d8f7f68 and https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0001-make-bcrypt-optional-on-win32.patch.
     apply_patch $patch_dir/0002-windows-xp-compatible-CancelIoEx.patch -p1 # Otherwise you'd get "The procedure entry point CancelIoEx could not be located in the dynamic link library KERNEL32.dll" while running ffmpeg.exe, ffplay.exe, or ffprobe.exe, because 'CancelIoEx()' is only available on Windows Vista and later. See https://github.com/FFmpeg/FFmpeg/commit/53aa76686e7ff4f1f6625502503d7923cec8c10e, https://trac.ffmpeg.org/ticket/5717 and https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0002-windows-xp-compatible-CancelIoEx.patch.
     apply_patch $patch_dir/0003-windows-xp-compatible-wcscp.patch -p1 # Otherwise you'd get "The procedure entry point wcscpy_s could not be located in the dynamic link library msvcrt.dll" while running ffmpeg.exe, ffplay.exe, or ffprobe.exe, because 'wcscpy()' is only available on Windows Vista and later. See https://github.com/FFmpeg/FFmpeg/commit/daf61dddc8e27424c320d5c3abe3e0c5182cd5c0.
     apply_patch $patch_dir/0004-load-shared-libfdk-aac-library-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0004-dynamic-loading-of-shared-fdk-aac-library.patch.
+    apply_patch $patch_dir/0004b-load-shared-libfdk-aac-configure-rebase.patch -p1 # 0004's own configure hunks bit-rotted (context changed too much for fuzzy matching, e.g. a new neighboring 'libmpeghdec' nonfree entry) between the old pinned FFmpeg commit and n8.1.2; same semantic change, rebased.
     apply_patch $patch_dir/0005-load-shared-frei0r-libraries-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0005-avfilters-better-behavior-of-frei0r-on-win32.patch.
-    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS" --extra-libs=-lssp) # '-lssp': some static deps (e.g. libmp3lame) are built with stack-protector, referencing __stack_chk_guard/__stack_chk_fail from libssp.a; without it explicitly on the link line, FFmpeg's own configure lib-detection link tests (and the final link) fail with "undefined reference".
+    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS" --extra-libs=-lssp --extra-ldflags=-Wl,--allow-multiple-definition) # '-lssp': some static deps (e.g. libmp3lame) are built with stack-protector, referencing __stack_chk_guard/__stack_chk_fail from libssp.a; without it explicitly on the link line, FFmpeg's own configure lib-detection link tests (and the final link) fail with "undefined reference". '--allow-multiple-definition': libssh and librist each vendor their own MinGW gettimeofday() shim (MSVCRT doesn't provide one) under the same symbol name, which collide at final-link time; both implementations are equivalent GetSystemTimeAsFileTime()-based polyfills, so it's safe to just let the linker keep whichever it sees first.
     if [[ $1 == "shared" ]]; then
       init_options+=(--enable-shared --disable-static) # Building a static FFmpeg is the default, so no need to specify '--enable-static --disable-shared'.
     fi
     init_options+=(--pkg-config=pkg-config --pkg-config-flags=--static --extra-version=Reino --enable-gpl --enable-gray --enable-version3 --disable-bcrypt --disable-debug --disable-doc --disable-htmlpages --disable-manpages --disable-mediafoundation --disable-podpages --disable-txtpages --disable-w32threads)
-    do_configure "${init_options[@]}" --enable-avisynth --enable-frei0r --enable-gmp --enable-libaom --enable-libass --enable-libfdk-aac --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopenmpt --enable-libopus --enable-librubberband --enable-libsoxr --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-mbedtls
-    do_make # Build 'ffmpeg.exe', 'ffplay.exe' and 'ffprobe.exe' (+ '*.dll' for shared build). No install.
+    init_options+=(--disable-vulkan --disable-d3d11va --disable-d3d12va --disable-dxva2 --disable-amf --disable-ffnvcodec) # None of these have a hope of working on WinXP (need Vista+ APIs and/or modern GPU drivers); explicitly off rather than relying on the mingw sysroot happening to lack the headers.
+    do_configure "${init_options[@]}" --enable-avisynth --enable-frei0r --enable-gmp --enable-lcms2 --enable-chromaprint --enable-libaom --enable-libass --enable-libbluray --enable-libdav1d --enable-libfdk-aac --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenmpt --enable-libopus --enable-librist --enable-librubberband --enable-libsoxr --enable-libspeex --enable-libssh --enable-libsvtav1 --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvo-amrwbenc --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzvbi --enable-mbedtls --enable-libopenh264 --enable-libopenjpeg --enable-libbs2b --enable-libcodec2 --enable-libdvdnav --enable-libdvdread --enable-libvmaf --enable-libqrencode --enable-libsnappy
+    # Deliberately NOT do_make here: its touchfile hash is based only on the make arguments (none, in this
+    # plain call), never on what './configure' just produced -- so once it succeeds once, EVERY later run
+    # with a changed --enable-* list (e.g. adding a new library) gets silently skipped as "Already made",
+    # even though config.h/ffbuild/config.mak changed and a real rebuild is needed. GNU Make's own
+    # dependency tracking on the actual source tree already does the right incremental-rebuild thing here,
+    # so just call it directly instead of going through the coarse per-invocation touchfile wrapper.
+    make -j $cpu_count || exit 1 # Build 'ffmpeg.exe', 'ffplay.exe' and 'ffprobe.exe' (+ '*.dll' for shared build). No install.
 
     mkdir -p $redist_dir
     archive="$redist_dir/ffmpeg-$(git describe --tags | tail -c +2 | sed 's/dev-//;s/g//')-win32-$1-xpmod-sse"
@@ -938,13 +996,361 @@ build_ffmpeg() {
   cd ..
 } # SDL2 (only for FFplay)
 
+build_dav1d() {
+  do_git_checkout https://code.videolan.org/videolan/dav1d.git dav1d_git "" 54706fc6bc0cdecab7e9593974a4039cc038fca7
+  cd dav1d_git
+    apply_patch $patch_dir/dav1d_winxp-compatible_no-srwlock.patch -p1 # src/thread.h unconditionally uses native
+    # Win32 SRWLOCK/CONDITION_VARIABLE/INIT_ONCE for _WIN32 (Vista+ only) instead of ever considering the
+    # POSIX pthread.h path meson.build could otherwise select -- route MinGW onto the existing pthreads-win32
+    # (already linked elsewhere in this build, e.g. libssh) branch instead, same reasoning as the libwebp patches.
+    apply_patch $patch_dir/dav1d_winxp-compatible_no-srwlock-win32-thread.patch -p1 # src/win32/thread.c is the
+    # matching implementation file for the above (dav1d_pthread_create/join/once) -- same guard, same fix.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Denable_tools=false -Denable_tests=false -Denable_examples=false
+      do_ninja_install
+      # dav1d.pc doesn't declare '-pthread': meson.build's Windows branch never adds a threads dependency at
+      # all (it assumes its own win32/thread.c covers threading), so now that MinGW uses real pthreads-win32
+      # via the patches above, this needs to be added by hand -- same story as libssh's '-pthread' fix.
+      local pc=$mingw_w64_x86_64_prefix/lib/pkgconfig/dav1d.pc
+      grep -q -- -pthread $pc || sed -i 's/^Libs:.*/& -pthread/' $pc
+    cd ..
+  cd ..
+} # Fast AV1 decoder (meson).
+
+build_svtav1() {
+  do_git_checkout https://gitlab.com/AOMediaCodec/SVT-AV1.git SVT-AV1_git "" 13438c1f4386ac96b4be1d9a8a9b9184f64a55f3
+  cd SVT-AV1_git
+    apply_patch $patch_dir/svt-av1_winxp-compatible-threads.patch -p1 # Source/Lib/Codec/svt_threads.h's CondVar
+    # struct and OnceType typedef unconditionally use native CRITICAL_SECTION+CONDITION_VARIABLE / INIT_ONCE
+    # for _WIN32 -- Vista+ only (CONDITION_VARIABLE, INIT_ONCE) -- even though this same file already has a
+    # complete, working POSIX pthread_mutex_t/pthread_cond_t/pthread_once_t implementation right next to it
+    # for the non-Windows case. Route MinGW onto that existing pthread branch instead, same reasoning as dav1d.
+    apply_patch $patch_dir/svt-av1_winxp-compatible-threads-impl.patch -p1 # Matching implementation in svt_threads.c (svt_create_cond_var/svt_set_cond_var/svt_wait_cond_var/svt_run_once) -- same guard, same fix.
+    mkdir -p Build_cmake
+    cd Build_cmake
+      do_cmake ${PWD%/*} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DBUILD_DEC=ON -DBUILD_ENC=ON -DBUILD_TESTING=OFF
+      do_make install
+    cd ..
+  cd ..
+} # Fast AV1 encoder (cmake).
+
+build_libsrt() {
+  do_git_checkout https://github.com/Haivision/srt.git libsrt_git "" fcae57145c000a9e7b72aa777adb8f85c2463242
+  cd libsrt_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DENABLE_SHARED=0 -DENABLE_STATIC=1 -DENABLE_APPS=0 -DENABLE_EXAMPLES=0 -DENABLE_UNITTESTS=0 -DENABLE_STDCXX_SYNC=ON -DUSE_ENCLIB=mbedtls -DENABLE_ENCRYPTION=1 -DMBEDTLS_LIBRARIES="$mingw_w64_x86_64_prefix/lib/libmbedtls.a;$mingw_w64_x86_64_prefix/lib/libmbedx509.a;$mingw_w64_x86_64_prefix/lib/libmbedcrypto.a" -DMBEDTLS_INCLUDE_DIR=$mingw_w64_x86_64_prefix/include
+      do_make install
+    cd ..
+  cd ..
+} # SRT streaming protocol; reuses the mbedtls we already build for FFmpeg's own TLS instead of adding yet another crypto lib.
+
+build_librist() {
+  do_git_checkout https://code.videolan.org/rist/librist.git librist_git "" 4f45ef8f78983892d52ccd52d9f675435b23738f
+  cd librist_git
+    apply_patch $patch_dir/librist_winpthreads-scalar-pthread_t.patch -p1 # rist.c does "if (some_pthread_t)"; under winpthreads pthread_t is a struct (no implicit bool conversion), so this fails to compile ("used struct type value where scalar is required"). memcmp against a zeroed pthread_t works on both winpthreads and POSIX.
+    apply_patch $patch_dir/librist_winxp-compatible-entropy.patch -p1 # src/crypto/random.c seeds its mbedTLS DRBG via BCryptGenRandom (bcrypt.dll / CNG) on _WIN32 unconditionally, regardless of the have_mingw_pthreads=true option above -- Vista+ only. Switch to the legacy CryptoAPI (CryptGenRandom), same fix as mbedtls's own entropy_poll.c patch.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Dtest=false -Dbuilt_tools=false -Dhave_mingw_pthreads=true # No 'http' option in this version; use_mbedtls already defaults to true, matching the mbedtls we already build.
+      do_ninja_install
+    cd ..
+  cd ..
+} # RIST streaming protocol (meson), SRT's sibling.
+
+build_libssh() {
+  do_git_checkout https://github.com/libssh/libssh-mirror.git libssh_git "" ac6d2fad4a8bf07277127736367e90387646363f # git.libssh.org is unreachable from here; use the official GitHub mirror instead.
+  cd libssh_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=OFF -DWITH_EXAMPLES=OFF -DWITH_SERVER=OFF -DUNIT_TESTING=OFF -DWITH_GSSAPI=OFF -DWITH_MBEDTLS=OFF -DWITH_GCRYPT=OFF # Force OpenSSL (build_openssl3 must run first): both mbedTLS and GCrypt are cached CMake options, so without explicit =OFF a stale CMakeCache.txt from an earlier experiment (or a future one) can silently keep the mbedTLS backend selected even once the flag is dropped from this command line.
+      do_make install
+      # Same story as chromaprint above: libssh.h defaults to __declspec(dllimport) unless LIBSSH_STATIC is
+      # defined, and the installed .pc's Libs is missing its OpenSSL dependency, so pkg-config consumers
+      # (FFmpeg's configure) fail with "undefined reference to `_imp__sftp_init'" otherwise.
+      local pc=$mingw_w64_x86_64_prefix/lib/pkgconfig/libssh.pc
+      grep -q LIBSSH_STATIC $pc || sed -i 's/^Cflags:.*/& -DLIBSSH_STATIC/' $pc
+      grep -q lssl $pc || sed -i 's/^Libs:.*/& -lssl -lcrypto -lz -lws2_32 -lcrypt32/' $pc
+      # libssh's own threads/pthread.c calls pthread_self/pthread_mutex_* directly; this toolchain's GCC
+      # uses the win32 thread model (no built-in winpthreads), so those symbols come from the separate
+      # pthreads-win32 (pthreads4w) lib instead -- '-pthread' pulls it in the same way librist's .pc does.
+      grep -q -- -pthread $pc || sed -i 's/^Libs:.*/& -pthread/' $pc
+    cd ..
+  cd ..
+} # SFTP protocol support. NB: different project from libssh2 (already built above for curl/hlsdl).
+
+build_libzvbi() {
+  do_git_checkout https://github.com/zapping-vbi/zvbi.git libzvbi_git main 4e222f98798d7afc0140b41a7c890257ac26e321
+  cd libzvbi_git
+    generic_configure --disable-dvb --disable-bktr --disable-nls --disable-proxy --without-doxygen
+    do_make install
+  cd ..
+} # Teletext decoding.
+
+build_chromaprint() {
+  do_git_checkout https://github.com/acoustid/chromaprint.git chromaprint_git "" aed8eba2202dd9d7b3b0a56c77904cc805490d72
+  cd chromaprint_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=OFF -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF -DFFT_LIB=fftw3 # Reuse the fftw we already build instead of adding kissfft or (circularly) avfft.
+      do_make install
+      # The installed .pc is incomplete for static linking: chromaprint.h defaults to __declspec(dllimport)
+      # unless CHROMAPRINT_NODLL is defined; it's a C++ lib (uses fftw3's C++-ish wrapper) but doesn't list
+      # -lfftw3 or the C++ runtime in Libs, and consumers here link with plain gcc (not g++), so libstdc++
+      # isn't pulled in automatically either. Without all of this, anything consuming it via pkg-config
+      # (like FFmpeg's configure) fails with "undefined reference" to chromaprint/fftw3/C++-runtime symbols.
+      local pc=$mingw_w64_x86_64_prefix/lib/pkgconfig/libchromaprint.pc
+      grep -q CHROMAPRINT_NODLL $pc || sed -i 's/^Cflags:.*/& -DCHROMAPRINT_NODLL/' $pc
+      grep -q lfftw3 $pc || sed -i 's/^Libs:.*/& -lfftw3 -lstdc++/' $pc
+    cd ..
+  cd ..
+} # Audio fingerprinting (MusicBrainz-style).
+
+build_libbluray() {
+  do_git_checkout https://code.videolan.org/videolan/libbluray.git libbluray_git "" 64bcf07f47452fb4724eef3febc40aaf7720d42a
+  cd libbluray_git
+    # Meson-only these days, no autotools left (no configure.ac).
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Denable_tools=false -Denable_examples=false -Dbdj_jar=disabled -Dfontconfig=disabled -Dfreetype=disabled -Dlibxml2=disabled # Disc structure reading only, no menu/BD-J rendering -- keeps this out of the Java/font-stack dependency chain.
+      do_ninja_install
+    cd ..
+  cd ..
+} # Blu-ray disc structure reading.
+
+build_opencore_amr() {
+  do_git_checkout https://github.com/BelledonneCommunications/opencore-amr.git opencore-amr_git "" 3b67218fb8efb776bcd79e7445774e02d778321d
+  cd opencore-amr_git
+    generic_configure --disable-shared
+    do_make install
+  cd ..
+} # AMR-NB/WB decode.
+
+build_vo_amrwbenc() {
+  do_git_checkout https://github.com/BelledonneCommunications/vo-amrwbenc.git vo-amrwbenc_git "" 3b3fcd0d250948e74cd67e7ea81af431ab3928f9
+  cd vo-amrwbenc_git
+    generic_configure --disable-shared
+    do_make install
+  cd ..
+} # AMR-WB encode.
+
+build_libilbc() {
+  do_git_checkout https://github.com/TimothyGu/libilbc.git libilbc_git main 6adb26d4a4e159cd66d4b4c5e411cd3de0ab6b5e
+  cd libilbc_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=OFF
+      do_make install
+    cd ..
+  cd ..
+} # VoIP speech codec.
+
+build_speex() {
+  do_git_checkout https://github.com/xiph/speex.git speex_git "" 05895229896dc942d453446eba6f9f5ddcf95422
+  cd speex_git
+    generic_configure --disable-binaries
+    do_make install
+  cd ..
+} # VoIP speech codec.
+
+build_theora() {
+  do_git_checkout https://github.com/xiph/theora.git theora_git main 28fd5ec77f0ad0e07a371cef1047828116f6bd8a
+  cd theora_git
+    generic_configure --disable-examples --disable-oggtest --disable-vorbistest --disable-spec
+    do_make install
+  cd ..
+} # Ogg Theora encode (decode is already native in FFmpeg).
+
+build_wavpack() {
+  do_git_checkout https://github.com/dbry/WavPack.git wavpack_git "" eccf998c7acce58e18dedd354e6b025728dcf6da
+  cd wavpack_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=OFF -DWAVPACK_BUILD_PROGRAMS=OFF -DWAVPACK_BUILD_DOCS=OFF -DWAVPACK_BUILD_COOLEDIT_PLUGIN=OFF -DWAVPACK_BUILD_WINAMP_PLUGIN=OFF -DWAVPACK_ENABLE_ASM=OFF # src/pack_x86.S doesn't assemble cleanly with this binutils (operand-size-mismatch errors); the plain-C fallback is plenty fast for lossless audio.
+      do_make install
+    cd ..
+  cd ..
+} # Lossless audio.
+
+build_lcms2() {
+  do_git_checkout https://github.com/mm2/Little-CMS.git lcms2_git "" a8183f542072ad4e941116ed921dc6e411077049
+  cd lcms2_git
+    generic_configure --without-jpeg --without-tiff
+    do_make install
+  cd ..
+} # Color management (colorspace/lut filters, libjxl's cms hook).
+
+build_gsm() {
+  do_git_checkout https://github.com/timothytylee/libgsm.git libgsm_git "" 98f1708fb5e06a0dfebd58a3b40d610823db9715
+  cd libgsm_git
+    # No CMakeLists.txt here after all (it's the classic Jutta Degener 1.0.17 source, no configure/CMake at
+    # all) -- build it by hand: it's just a dozen .c files into a static archive, not worth chasing a build
+    # system for.
+    local name=$(get_small_touchfile_name already_built_gsm "$CFLAGS")
+    if [ ! -f $name ]; then
+      rm -f src/*.o
+      for f in src/*.c; do
+        ${cross_prefix}gcc $CFLAGS -DNeedFunctionPrototypes=1 -Iinc -c "$f" -o "${f%.c}.o" || exit 1
+      done
+      ${cross_prefix}ar rc src/libgsm.a src/*.o || exit 1
+      ${cross_prefix}ranlib src/libgsm.a || exit 1
+      mkdir -p $mingw_w64_x86_64_prefix/include/gsm
+      install -m644 inc/gsm.h $mingw_w64_x86_64_prefix/include/gsm/gsm.h || exit 1
+      install -m644 src/libgsm.a $mingw_w64_x86_64_prefix/lib/libgsm.a || exit 1
+      touch $name || exit 1
+    fi
+  cd ..
+} # GSM 06.10 codec (old mobile telephony).
+
+build_libopenh264() {
+  do_git_checkout https://github.com/cisco/openh264.git libopenh264_git "" 35325f4040c2be0f86246c4a8923f7fc04c1a998
+  cd libopenh264_git
+    do_make OS=mingw_nt ARCH=x86 ASM_ARCH=x86 CC=${cross_prefix}gcc CXX=${cross_prefix}g++ AR=${cross_prefix}ar RANLIB=${cross_prefix}ranlib STRIP=${cross_prefix}strip PREFIX=$mingw_w64_x86_64_prefix install-static
+    # 'openh264-static.pc' already gets '-lstdc++' baked into its Libs by openh264's own Makefile (its
+    # STATIC_LDFLAGS variable) and gets installed as plain 'openh264.pc' -- unlike chromaprint/libssh above,
+    # this one's pkg-config file is already complete for static linking, no fixup needed.
+  cd ..
+} # Cisco's openly-licensed H.264 codec (own Makefile build system, not autotools/CMake/meson).
+
+build_libopenjpeg() {
+  do_git_checkout https://github.com/uclouvain/openjpeg.git libopenjpeg_git "" 402ef5862195b177ea0a7788f2a6ef2804e62285
+  cd libopenjpeg_git
+    do_cmake $PWD -DBUILD_SHARED_LIBS=0 -DBUILD_STATIC_LIBS=1 -DBUILD_CODEC=0 -DBUILD_DOC=0 -DBUILD_TESTING=0
+    do_make install
+  cd ..
+} # JPEG2000.
+
+build_libbs2b() {
+  download_and_unpack_file http://downloads.sourceforge.net/project/bs2b/libbs2b/3.1.0/libbs2b-3.1.0.tar.gz
+  cd libbs2b-3.1.0
+    if [[ ! -f src/Makefile.in.bak ]]; then # Library only: 'bin_PROGRAMS' isn't behind any --disable flag (there
+      # is no such flag -- '--disable-static-bins' isn't a real option this configure.ac defines), so
+      # bs2bconvert/bs2bstream get built unconditionally otherwise, and bs2bconvert needs '-lsndfile', which
+      # we don't build (nothing else here needs it -- libbs2b.la itself only links '-lm').
+      sed -i.bak '/^bin_PROGRAMS/d;/^PROGRAMS = \$(bin_PROGRAMS)/d' src/Makefile.in
+    fi
+    # configure.ac also has an unconditional top-level 'PKG_CHECK_EXISTS([sndfile], ..., AC_MSG_ERROR(...))'
+    # sanity check -- completely unused by the library itself, just a pkg-config *existence* probe. Satisfy it
+    # with a throwaway fake .pc (only visible to this one configure invocation) instead of building real libsndfile.
+    mkdir -p fake_pkgconfig
+    printf 'Name: sndfile\nDescription: fake stub, only its existence is ever checked\nVersion: 1.0.0\n' > fake_pkgconfig/sndfile.pc
+    # configure.ac's AC_FUNC_MALLOC can't actually run a test program while cross-compiling, so it
+    # conservatively assumes malloc(0) isn't GNU-compatible and '#define malloc rpl_malloc' in config.h,
+    # expecting bs2b to ship its own rpl_malloc() replacement (it doesn't) -- "undefined reference to
+    # `rpl_malloc'" at link time. MinGW's malloc actually IS GNU-compatible; this is autoconf's own
+    # documented cross-compiling workaround (same idiom as this script's global ac_cv_func__mktemp_s=no).
+    PKG_CONFIG_PATH="$PWD/fake_pkgconfig:$PKG_CONFIG_PATH" ac_cv_func_malloc_0_nonnull=yes generic_configure
+    do_make install
+  cd ..
+} # Bauer stereophonic-to-binaural DSP filter ('bs2b' audio filter). Dormant upstream (last release 2009) but complete/stable.
+
+build_libcodec2() {
+  do_git_checkout https://github.com/drowe67/codec2.git libcodec2_git main 310777b1c6f1af0bc7c72f5b32f80f6fd9136962
+  cd libcodec2_git
+    if [[ ! -f CMakeLists.txt.bak ]]; then
+      # No flag disables the demo/utility .exe's (UNITTEST=0 only covers unit tests), and their WIN32-only
+      # 'install(SCRIPT GetDependencies.cmake)' step (CPack/NSIS installer DLL-bundling helper, irrelevant to
+      # us) fails at install time with "could not find requested file: cmake/GetPrerequisites.cmake" -- that
+      # file genuinely doesn't exist in this repo. Just drop the one line; the demo .exe's still get built
+      # (harmless, unused) but no longer block 'make install' of the actual static library.
+      sed -i.bak '/install(SCRIPT \${CMAKE_BINARY_DIR}\/cmake\/GetDependencies.cmake)/d' CMakeLists.txt
+    fi
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=0 -DUNITTEST=0 -DLPCNET=0
+      do_make install
+    cd ..
+  cd ..
+} # Very-low-bitrate speech codec (digital voice/ham radio use case).
+
+build_libdvdread() {
+  do_git_checkout https://code.videolan.org/videolan/libdvdread.git libdvdread_git "" 3a1a072755a121d418359964f27451c28d9853e8
+  cd libdvdread_git
+    # Meson-only these days, no autotools left (no configure.ac) -- same story as libbluray earlier.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Dlibdvdcss=disabled -Denable_docs=false # Explicitly disabled (not just left at its 'auto'
+      # default) to keep this build free of CSS-decryption code even if a stray libdvdcss.pc ever showed up
+      # in the prefix. libdvdread can still dlopen() a system-provided libdvdcss DLL at runtime if the user
+      # drops one in next to ffmpeg.exe, but nothing here links or ships it -- unencrypted/homemade DVDs read
+      # fine either way.
+      do_ninja_install
+    cd ..
+  cd ..
+} # DVD structure/sector reading (libdvdnav's dependency).
+
+build_libdvdnav() {
+  do_git_checkout https://code.videolan.org/videolan/libdvdnav.git libdvdnav_git "" e0c02b973c62081ee8dc109726e511e94c10f70e
+  cd libdvdnav_git
+    # Meson-only, same as libdvdread above. 'enable_examples' already defaults to false.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Denable_docs=false
+      do_ninja_install
+    cd ..
+  cd ..
+} # DVD menu/navigation (dvdnav:// input), needs libdvdread above.
+
+build_libvmaf() {
+  do_git_checkout https://github.com/Netflix/vmaf.git libvmaf_git "" 4991d2b5aeb26391fbb85b63e3e86e7ad7a94b6e
+  cd libvmaf_git/libvmaf # Meson project lives in the 'libvmaf' subdirectory, not the repo root.
+    mkdir -p build_dir
+    cd build_dir
+      do_meson .. -Denable_tests=false -Denable_docs=false -Denable_tools=false -Denable_avx512=false # avx512 is moot on a Core2 target; keep baseline SSE/SSSE3 asm (enable_asm stays default-on).
+      do_ninja_install
+      # Same C++-runtime story as chromaprint above: libvmaf.a bundles one C++ compilation unit (svm.cpp, its
+      # SVM model parser) needing libstdc++/RTTI/exception-handling symbols, but the installed .pc's Libs
+      # doesn't list it and FFmpeg's configure link-tests with plain gcc, not g++ -- "undefined reference to
+      # `operator delete(void*)'" etc. otherwise.
+      local pc=$mingw_w64_x86_64_prefix/lib/pkgconfig/libvmaf.pc
+      grep -q lstdc++ $pc || sed -i 's/^Libs:.*/& -lstdc++/' $pc
+    cd ..
+  cd ../..
+} # Netflix's objective video-quality metric ('-lavfi libvmaf' filter, '-vmaf' output).
+
+build_libqrencode() {
+  do_git_checkout https://github.com/fukuchi/libqrencode.git libqrencode_git "" 715e29fd4cd71b6e452ae0f4e36d917b43122ce8
+  cd libqrencode_git
+    if [[ ! -f qrencode.c.bak ]]; then # Upstream bug: configure.ac's AC_INIT/AM_INIT_AUTOMAKE never actually
+      # AC_DEFINEs a plain 'VERSION' macro (config.h.in only has '#undef PACKAGE_VERSION'), but
+      # QRcode_APIVersionString() in qrencode.c references bare VERSION anyway -- "'VERSION' undeclared".
+      # Use the macro that config.h actually defines.
+      sed -i.bak 's/return VERSION;/return PACKAGE_VERSION;/' qrencode.c
+    fi
+    generic_configure --without-tools --without-png --without-tests
+    do_make install
+  cd ..
+} # QR-code generation ('qrencode' bitstream filter).
+
+build_libsnappy() {
+  do_git_checkout https://github.com/google/snappy.git libsnappy_git main 6af9287fbdb913f0794d0148c6aa43b58e63c8e3 # v1.2.2. Repo defaults to 'main', not 'master'. Pinned to a release tag commit rather than tip -- unlike most git deps here, Google's snappy 'main' branch isn't guaranteed build-stable.
+  cd libsnappy_git
+    mkdir -p build_dir
+    cd build_dir
+      do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=0 -DSNAPPY_BUILD_TESTS=0 -DSNAPPY_BUILD_BENCHMARKS=0 -DSNAPPY_INSTALL=1
+      do_make install
+      # Same C++-runtime story as chromaprint: snappy doesn't generate a .pc at all, and FFmpeg's configure
+      # check for it (require, not require_pkg_config) links plain '-lsnappy -lstdc++' directly -- so nothing
+      # to patch here, just needs libstdc++ present on the link line, which FFmpeg's own check already adds.
+    cd ..
+  cd ..
+} # Google Snappy compression (used by a handful of muxers/demuxers).
+
 build_dependencies() {
   build_mingw_std_threads
-  unset CFLAGS # Python/CMake/NASM are native host build tools; the WinXP-target flags (-march=pentium3 etc.) don't apply and break the native compile on 64-bit hosts ("CPU you selected does not support x86-64 instruction set").
-  build_python
-  build_cmake
-  build_nasm
-  reset_cflags
+  # Deliberately NOT building our own Python/CMake/NASM here (upstream does, as build_python()/build_cmake()/
+  # build_nasm() further down still show): that's a Cygwin-only need (no adequate system versions there).
+  # On native Linux those --prefix=/usr installs actively hurt more than they help:
+  #  - Python: it overwrote /usr/bin/python3 with an ancient 3.4.10 for the rest of the container's life, and
+  #    newer host-side build-time codegen scripts (e.g. fontconfig's fc-case.py) use f-strings, needing 3.6+.
+  #  - CMake/NASM: their WinXP-target CFLAGS leak into the native compile and break it on 64-bit hosts ("CPU
+  #    you selected does not support x86-64 instruction set") unless carefully unset/reset around them; and
+  #    worse, since they install to /usr (not the bind-mounted sandbox), that install does NOT survive this
+  #    container being recreated (e.g. after an image rebuild) even though the sandbox's own "already built"
+  #    touchfile does -- so the script silently skips reinstalling them into a container that doesn't actually
+  #    have them, which surfaces later, confusingly, as some unrelated dependency's build failing to find nasm.
+  # apt's python3/cmake/nasm (pulled in directly or via the 'meson' package) are fine substitutes.
   build_dlfcn
   build_bzip2 # Bzlib (bzip2) in FFmpeg is autodetected, so no need for --enable-bzlib.
   build_liblzma # Lzma in FFmpeg is autodetected, so no need for --enable-lzma.
@@ -956,8 +1362,19 @@ build_dependencies() {
   build_freetype
   build_libxml2 # For DASH support configure FFmpeg with --enable-libxml2.
   build_fontconfig
+  build_lcms2 # Color management; used by FFmpeg's colorspace/lut filters.
   build_gmp # For RTMP support configure FFmpeg with --enable-gmp.
   build_mbedtls # For HTTPS TLS 1.2 support on WinXP configure FFmpeg with --enable-mbedtls.
+  # build_libsrt intentionally not called: SRT's own CMakeLists.txt only has first-class support for
+  # "real Windows" (MSVC, detected via the MICROSOFT var) or POSIX, not MinGW cross-compilation, which
+  # falls into neither bucket. Forcing -DENABLE_STDCXX_SYNC=ON gets further but then srtcore/api.cpp fails
+  # with "'ScopedLock' was not declared" -- sync.h mixes '#ifdef ENABLE_STDCXX_SYNC' (defined-check) and
+  # '#if ENABLE_STDCXX_SYNC' (value-check) in ways that don't agree on how CMake passes the flag. This
+  # looks like a genuine upstream MinGW-support gap, not something to patch around here. librist below
+  # covers the same "reliable streaming ingest" use case with a build that Just Works.
+  build_librist
+  build_openssl3 static # For libssh below, which defaults to (and is better-tested with) OpenSSL over its mbedTLS backend.
+  build_libssh
   build_libogg
   build_libvorbis
   build_libopus
@@ -971,6 +1388,7 @@ build_dependencies() {
   build_libflite
   build_libsamplerate
   build_fftw
+  build_chromaprint # Reuses fftw above -- must come after it.
   build_librubberband
   build_libzimg
   build_vidstab
@@ -984,6 +1402,31 @@ build_dependencies() {
   build_libx265
   build_libvpx
   build_libaom
+  build_dav1d
+  build_svtav1
+  build_libzvbi
+  build_libbluray
+  build_opencore_amr
+  build_vo_amrwbenc
+  # build_libilbc intentionally not called: this fork is a vendored copy of WebRTC's iLBC implementation
+  # (its source tree layout is literally WebRTC's modules/audio_coding/codecs/ilbc/), which pulls in
+  # Google's Abseil C++ library that we don't build. No simpler standalone iLBC fork was found. iLBC is
+  # a fairly obscure 2000s VoIP codec at this point -- not worth adding Abseil as a dependency chain for.
+  build_speex
+  build_theora
+  # build_wavpack intentionally not called: FFmpeg has a fully native WavPack encoder AND decoder
+  # (ff_wavpack_encoder/ff_wavpack_decoder in libavcodec/allcodecs.c) -- no external lib or configure
+  # flag for it exists at all. Same situation as AC-3/FLAC: nothing to add here.
+  build_gsm
+  build_libopenh264
+  build_libopenjpeg
+  build_libbs2b
+  build_libcodec2
+  build_libdvdread # Must come before libdvdnav below, which links against it.
+  build_libdvdnav
+  build_libvmaf
+  build_libqrencode
+  build_libsnappy
 }
 
 build_apps() {
@@ -994,39 +1437,9 @@ build_apps() {
   fi
 }
 
-build_openssl() {
-  download_and_unpack_file https://www.openssl.org/source/openssl-1.1.1w.tar.gz
-  cd openssl-1.1.1w
-    if [[ ! -f Configurations/10-main.conf.bak ]]; then # Change GCC optimization level.
-      sed -i.bak "s/-O3/-O2/" Configurations/10-main.conf
-    fi
-    local config_options=(./Configure --prefix=$mingw_w64_x86_64_prefix mingw zlib no-async)
-    # "Note: on older OSes, like CentOS 5, BSD 5, and Windows XP or Vista, you will need to configure with no-async when building OpenSSL 1.1.0 and above. The configuration system does not detect lack of the Posix feature on the platforms." (https://wiki.openssl.org/index.php/Compilation_and_Installation)
-    if [ "$1" = "static" ]; then
-      make distclean || exit 1
-      CC="${cross_prefix}gcc" AR="${cross_prefix}ar" RANLIB="${cross_prefix}ranlib" do_configure "${config_options[@]}" no-shared no-dso # No 'no-engine' because Curl needs it when built with Libssh2.
-      do_make install_dev
-    else
-      CC="${cross_prefix}gcc" AR="${cross_prefix}ar" RANLIB="${cross_prefix}ranlib" do_configure "${config_options[@]}" shared
-      do_make build_libs
-
-      mkdir -p $redist_dir
-      archive="$redist_dir/openssl-1.1.1w-win32-xpmod-sse"
-      if [[ ! -f $archive.7z ]]; then # Pack shared libraries.
-        sed "s/$/\r/" LICENSE > LICENSE.txt
-        ${cross_prefix}strip -ps libcrypto-1_1.dll libssl-1_1.dll
-        7z a -mx=9 -bb3 $archive.7z libcrypto-1_1.dll libssl-1_1.dll LICENSE.txt
-        rm -v LICENSE.txt
-      else
-        echo -e "\e[1;33mAlready made '${archive##*/}.7z'.\e[0m"
-      fi
-    fi
-  cd ..
-} # This is to compile 'libcrypto-1_1.dll' and 'libssl-1_1.dll' for Xidel, or a static library for hlsdl.
-
 build_openssl3() {
-  download_and_unpack_file https://www.openssl.org/source/openssl-3.3.1.tar.gz
-  cd openssl-3.3.1
+  download_and_unpack_file https://www.openssl.org/source/openssl-3.6.3.tar.gz
+  cd openssl-3.6.3
     if [[ ! -f Configurations/10-main.conf.bak ]]; then # Change GCC optimization level.
       sed -i.bak "s/-O3/-O2/" Configurations/10-main.conf
     fi
@@ -1043,7 +1456,7 @@ build_openssl3() {
       do_make build_libs
 
       mkdir -p $redist_dir
-      archive="$redist_dir/openssl-3.3.1-win32-xpmod-sse"
+      archive="$redist_dir/openssl-3.6.3-win32-xpmod-sse"
       if [[ ! -f $archive.7z ]]; then # Pack shared libraries.
         ${cross_prefix}strip -ps libcrypto-3.dll libssl-3.dll
         7z a -mx=9 -bb3 $archive.7z libcrypto-3.dll libssl-3.dll LICENSE.txt
@@ -1226,6 +1639,22 @@ export PKG_CONFIG_PATH="$mingw_w64_x86_64_prefix/lib/pkgconfig"
 export PATH="$mingw_bin_path:$original_path"
 cross_prefix="$mingw_bin_path/i686-w64-mingw32-"
 make_prefix_options="CC=${cross_prefix}gcc AR=${cross_prefix}ar PREFIX=$mingw_w64_x86_64_prefix RANLIB=${cross_prefix}ranlib LD=${cross_prefix}ld STRIP=${cross_prefix}strip CXX=${cross_prefix}g++"
+meson_cross_file="$cur_dir/meson-cross-mingw32.txt"
+cat > "$meson_cross_file" <<EOF
+[binaries]
+c = '${cross_prefix}gcc'
+cpp = '${cross_prefix}g++'
+ar = '${cross_prefix}ar'
+strip = '${cross_prefix}strip'
+windres = '${cross_prefix}windres'
+pkgconfig = 'pkg-config'
+
+[host_machine]
+system = 'windows'
+cpu_family = 'x86'
+cpu = 'i686'
+endian = 'little'
+EOF
 mkdir -p win32
 cd win32
   build_dependencies

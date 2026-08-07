@@ -1,0 +1,11 @@
+--- a/src/thread.h
++++ b/src/thread.h
+@@ -28,7 +28,7 @@
+ #ifndef DAV1D_SRC_THREAD_H
+ #define DAV1D_SRC_THREAD_H
+ 
+-#if defined(_WIN32)
++#if defined(_WIN32) && !defined(__MINGW32__)
+ 
+ #include <limits.h>
+ #include <windows.h>

@@ -12,37 +12,6 @@ See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0004-dynamic-lo
  4 files changed, 149 insertions(+), 9 deletions(-)
  create mode 100644 libavcodec/libfdk-aac_internal.h
 
-diff --git a/configure b/configure
-index b950024..d999570 100755
---- a/configure
-+++ b/configure
-@@ -1877,7 +1877,6 @@ EXTERNAL_LIBRARY_GPL_LIST="
- 
- EXTERNAL_LIBRARY_NONFREE_LIST="
-     decklink
--    libfdk_aac
-     libtls
- "
- 
-@@ -1917,6 +1916,7 @@ EXTERNAL_LIBRARY_LIST="
-     libcodec2
-     libdav1d
-     libdc1394
-+    libfdk_aac
-     libflite
-     libfontconfig
-     libfreetype
-@@ -6874,9 +6874,7 @@ enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1
- enabled libdrm            && check_pkg_config libdrm libdrm xf86drm.h drmGetVersion
- enabled libdvdnav         && require_pkg_config libdvdnav "dvdnav >= 6.1.1" dvdnav/dvdnav.h dvdnav_open2
- enabled libdvdread        && require_pkg_config libdvdread "dvdread >= 6.1.2" dvdread/dvd_reader.h DVDOpen2
--enabled libfdk_aac        && { check_pkg_config libfdk_aac fdk-aac "fdk-aac/aacenc_lib.h" aacEncOpen ||
--                               { require libfdk_aac fdk-aac/aacenc_lib.h aacEncOpen -lfdk-aac &&
--                                 warn "using libfdk without pkg-config"; } }
-+enabled libfdk_aac        && require_headers fdk-aac/aacenc_lib.h
- flite_extralibs="-lflite_cmu_time_awb -lflite_cmu_us_awb -lflite_cmu_us_kal -lflite_cmu_us_kal16 -lflite_cmu_us_rms -lflite_cmu_us_slt -lflite_usenglish -lflite_cmulex -lflite"
- enabled libflite          && require libflite "flite/flite.h" flite_init $flite_extralibs
- enabled fontconfig        && enable libfontconfig
 diff --git a/libavcodec/libfdk-aac_internal.h b/libavcodec/libfdk-aac_internal.h
 new file mode 100644
 index 0000000..cd1e6e3
