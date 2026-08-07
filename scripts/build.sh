@@ -8,18 +8,21 @@
 # sources under ffmpeg_local_builds/sandbox/ are bind-mounted from the host
 # and always survive regardless of the container's lifecycle.
 #
-# Usage: scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
+# Usage: scripts/build.sh [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=...] [--tier=NAME]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 IMAGE=ffmpeg-xp-builder:baseline
-CONTAINER=ffmpeg-xp-baseline
 CPUS="${FFMPEG_XP_CPUS:-4}"
-LOG="logs/build.log"
+ARCH=32
+CFLAGS=""
+TIER="" # Short label for this target, e.g. "pentium3" or "nehalem-64" -- picks the container name and log file, so
+        # each CPU tier/arch combo gets its own independently resumable container. Empty (the default) preserves
+        # the original single-target names exactly: container "ffmpeg-xp-baseline", log "logs/build.log".
 
 usage() {
   cat <<EOF
-Usage: $0 [--rebuild-image] [--clean] [--cpus N]
+Usage: $0 [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=STRING] [--tier=NAME]
 
   --rebuild-image  Rebuild the podman image from Containerfile even if it
                     already exists.
@@ -30,6 +33,19 @@ Usage: $0 [--rebuild-image] [--clean] [--cpus N]
                     away if you delete it yourself.
   --cpus N         CPU limit passed to 'podman run --cpus' (default: 4, or
                     \$FFMPEG_XP_CPUS).
+  --arch=32|64     Passed through to cross_compile_ffmpeg.sh's --arch=
+                    (default: 32). 64 targets Windows XP x64 Edition/Server
+                    2003, not regular 32-bit XP.
+  --cflags=STRING  Passed through to cross_compile_ffmpeg.sh's --cflags=
+                    (default: the script's own, currently -march=core2).
+  --tier=NAME      Short label for this build target (e.g. "pentium3",
+                    "nehalem-64") -- selects the container name
+                    ("ffmpeg-xp-\$TIER") and log file
+                    ("logs/build-\$TIER.log") so each CPU tier gets its own
+                    independently resumable container. Omit for the
+                    original single-target behavior (container
+                    "ffmpeg-xp-baseline", log "logs/build.log"). See
+                    scripts/build-matrix.sh to build every tier in one go.
 
 Notes:
   - Networking is forced IPv4-only ('podman run --network pasta:-4'). Some
@@ -49,10 +65,21 @@ while [[ $# -gt 0 ]]; do
     --rebuild-image) rebuild_image=1; shift ;;
     --clean) clean=1; shift ;;
     --cpus) CPUS="$2"; shift 2 ;;
+    --arch=*) ARCH="${1#*=}"; shift ;;
+    --cflags=*) CFLAGS="${1#*=}"; shift ;;
+    --tier=*) TIER="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
+
+CONTAINER="ffmpeg-xp-${TIER:-baseline}"
+LOG="logs/build${TIER:+-$TIER}.log"
+
+# Build the inner cross_compile_ffmpeg.sh invocation. --cflags= is only added if set, so the default run keeps
+# using the script's own built-in default CFLAGS untouched (avoids re-quoting/re-stating it here).
+inner_cmd="cd /work/ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH"
+[[ -n "$CFLAGS" ]] && inner_cmd+=" --cflags='$CFLAGS'"
 
 mkdir -p logs
 
@@ -72,11 +99,11 @@ if podman container exists "$CONTAINER"; then
   podman start -a "$CONTAINER" 2>&1 | tee "$LOG"
   status=$?
 else
-  echo "Creating container $CONTAINER (cpus=$CPUS)..."
+  echo "Creating container $CONTAINER (cpus=$CPUS, arch=$ARCH${CFLAGS:+, cflags=$CFLAGS})..."
   podman run --name "$CONTAINER" --cpus="$CPUS" --network pasta:-4 \
     -v "$(pwd)":/work:Z \
     "$IMAGE" \
-    bash -lc 'cd /work/ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y' \
+    bash -lc "$inner_cmd" \
     2>&1 | tee "$LOG"
   status=$?
 fi
@@ -85,8 +112,7 @@ set -e
 echo
 if [[ $status -eq 0 ]]; then
   echo "Build succeeded. Log: $LOG"
-  echo "Artifacts:"
-  ls -la ffmpeg_local_builds/sandbox/win32/FFmpeg_git/{ffmpeg,ffplay,ffprobe}.exe 2>/dev/null || true
+  echo "Artifacts: see redist/ for the dated release folder (BUILD_INFO.txt inside names the exact target)."
   echo
   echo "Run scripts/check-xp-compat.sh to verify Windows XP compatibility."
 else

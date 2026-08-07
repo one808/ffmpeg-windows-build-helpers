@@ -47,8 +47,11 @@ resumes the *same* container and only rebuilds what actually changed.
 The finished binaries land at:
 
 ```
-ffmpeg_local_builds/sandbox/win32/FFmpeg_git/{ffmpeg,ffplay,ffprobe}.exe
+ffmpeg_local_builds/sandbox/win<arch>-<tier>/FFmpeg_git/{ffmpeg,ffplay,ffprobe}.exe
 ```
+
+e.g. `win32-core2/FFmpeg_git/ffmpeg.exe` for the default target (see
+"Building multiple CPU targets" below for the other tiers).
 
 and a packaged release archive at
 `redist/<timestamp>_ffmpeg-<version>_winxp-<cpu>-<bits>/ffmpeg-*-static-winxp-*.7z`
@@ -57,19 +60,20 @@ and a packaged release archive at
 `BUILD_INFO.txt` (version/target/CFLAGS summary) and a `SHA256SUMS` alongside
 every `.7z` produced that run.
 
-`scripts/check-xp-compat.sh` inspects those `.exe` files' PE headers and
-import tables (via `objdump`, run inside the same podman image) and fails if
-it finds either a subsystem version above XP's 5.1 ceiling, or an imported
-symbol known to exist only on Windows Vista or later (`CancelIoEx`,
-`BCryptGenRandom`, `InitializeSRWLock`, `GetTickCount64`, the `_s`-suffixed
-"secure" CRT functions, etc.). This is a static check, not a substitute for
-actually running the result on real XP (or an XP VM) -- see "What this
-doesn't catch" below.
+`scripts/check-xp-compat.sh [--target=win32-core2]` inspects those `.exe`
+files' PE headers and import tables (via `objdump`, run inside the same
+podman image) and fails if it finds either a subsystem version above the
+target's ceiling (5.1 for 32-bit XP, 5.2 for the `win64-*` targets/XP x64
+Edition), or an imported symbol known to exist only on Windows Vista or
+later (`CancelIoEx`, `BCryptGenRandom`, `InitializeSRWLock`,
+`GetTickCount64`, the `_s`-suffixed "secure" CRT functions, etc.). This is a
+static check, not a substitute for actually running the result on real XP
+(or an XP VM) -- see "What this doesn't catch" below.
 
 ### `scripts/build.sh` options
 
 ```
-scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
+scripts/build.sh [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=STRING] [--tier=NAME]
 ```
 
 - `--rebuild-image` -- rebuild the podman image from `Containerfile` even if
@@ -81,6 +85,54 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
   cross-compiler are untouched.
 - `--cpus N` -- CPU limit passed to `podman run --cpus` (default `4`, or set
   `$FFMPEG_XP_CPUS`).
+- `--arch=32|64` -- target bitness (default `32`). `64` targets Windows XP
+  x64 Edition/Windows Server 2003 (NT 5.2), not regular 32-bit XP (NT 5.1) --
+  a much more niche target, but the same codebase/patch set covers both.
+- `--cflags=STRING` -- CPU tuning flags, e.g. `-O2 -march=pentium3
+  -mtune=pentium3` for a pre-SSE2 machine (default: the script's own,
+  currently `-O2 -march=core2 -mtune=core2`).
+- `--tier=NAME` -- short label for this build target (e.g. `pentium3`,
+  `sandybridge-64`). Selects the container name (`ffmpeg-xp-NAME`) and log
+  file (`logs/build-NAME.log`) so each CPU tier/arch combo gets its own
+  independently resumable container and dependency-build subdirectory
+  (`ffmpeg_local_builds/sandbox/win<arch>-<tier>/`). Omit for the original
+  single-target behavior (container `ffmpeg-xp-baseline`, log
+  `logs/build.log`, subdirectory `win32-core2/`).
+
+### Building multiple CPU targets (`scripts/build-matrix.sh`)
+
+To build every supported CPU tier in one go:
+
+```sh
+scripts/build-matrix.sh                          # build all 8 targets
+scripts/build-matrix.sh --only=pentium3,nehalem  # build a subset
+scripts/build-matrix.sh --audit                  # + run check-xp-compat.sh after each tier
+```
+
+The full matrix:
+
+| Tier             | Arch | CFLAGS                                  |
+|------------------|------|------------------------------------------|
+| `pentium3`       | 32   | `-O2 -march=pentium3 -mtune=pentium3`     |
+| `pentium-m`      | 32   | `-O2 -march=pentium-m -mtune=pentium-m`   |
+| `athlon64`       | 32   | `-O2 -march=athlon64 -mtune=athlon64`     |
+| `core2`          | 32   | `-O2 -march=core2 -mtune=core2`           |
+| `amdfam10`       | 32   | `-O2 -march=amdfam10 -mtune=amdfam10`     |
+| `nehalem`        | 32   | `-O2 -march=nehalem -mtune=nehalem`       |
+| `athlon64-64`    | 64   | `-O2 -march=athlon64 -mtune=athlon64`     |
+| `sandybridge-64` | 64   | `-O2 -march=sandybridge -mtune=sandybridge` |
+
+All CPU names are concrete `-march=` values, not the `x86-64-v2`/`v3`
+microarchitecture-level syntax -- this toolchain's GCC (10.4.0) predates that
+syntax (introduced in GCC 11). Every tier of the same bitness shares one
+mingw-w64 cross-compiler toolchain (`cross_compilers/mingw-w64-i686/` or
+`cross_compilers/mingw-w64-x86_64/`) but gets its own from-scratch dependency
+tree, so only the *first* 32-bit tier and the *first* 64-bit tier you build
+pay the toolchain build cost -- every other tier of that bitness reuses it.
+Each tier is otherwise a full independent build (~63 dependencies + FFmpeg),
+so budget several hours per tier and correspondingly more disk space (each
+tier's dependency tree is on the order of the ~15 GB quoted above, on top of
+the shared toolchain).
 
 ### How caching works (read this before deleting anything)
 
@@ -97,15 +149,15 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
   `--clean` exists as an explicit opt-in rather than being the default.
 - If you need to force a full rebuild after a global setting changes (e.g.
   `original_cflags` in `cross_compile_ffmpeg.sh`), **do not** just
-  `rm -rf ffmpeg_local_builds/sandbox/win32` -- that deletes the `.git`
-  checkouts too and forces every dependency to be re-cloned from scratch
-  (~50 git repositories, some large: FFmpeg itself, x265, aom, libjxl +
-  submodules, AviSynthPlus, libvpx, libwebp, SVT-AV1, ...). For those, force a
-  recompile *without* re-cloning instead:
+  `rm -rf ffmpeg_local_builds/sandbox/win<arch>-<tier>` -- that deletes the
+  `.git` checkouts too and forces every dependency to be re-cloned from
+  scratch (~50 git repositories, some large: FFmpeg itself, x265, aom, libjxl
+  + submodules, AviSynthPlus, libvpx, libwebp, SVT-AV1, ...). For those, force
+  a recompile *without* re-cloning instead:
   ```sh
   # inside a throwaway container, since the sandbox is root-owned:
   podman run --rm -v "$(pwd)":/work:Z ffmpeg-xp-builder:baseline \
-    bash -lc 'cd /work/ffmpeg_local_builds/sandbox/win32 && for d in */; do
+    bash -lc 'cd /work/ffmpeg_local_builds/sandbox/win<arch>-<tier> && for d in */; do
       [ -d "$d/.git" ] && (cd "$d" && git clean -fdx && git reset --hard)
     done'
   ```
@@ -126,11 +178,12 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N]
 
 ### Target CPU
 
-`original_cflags` in `ffmpeg_local_builds/cross_compile_ffmpeg.sh` is set to
-`-march=core2 -mtune=core2`. Change it if your target CPU differs -- the
-upstream default (`-march=pentium3 -mtune=athlon-xp -msse`) is far more
-conservative (SSE-only, no SSE2) and only makes sense if you're actually
-targeting a pre-SSE2 CPU.
+`original_cflags` in `ffmpeg_local_builds/cross_compile_ffmpeg.sh` defaults
+to `-march=core2 -mtune=core2` when no `--cflags=` is passed. Override it via
+`scripts/build.sh --cflags='...'` (see "Building multiple CPU targets"
+above for the full pre-defined tier matrix, from pre-SSE2 `pentium3` up
+through modern `sandybridge-64`) instead of editing the script for one-off
+targets.
 
 ### Dependency versions
 

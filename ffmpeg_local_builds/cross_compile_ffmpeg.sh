@@ -76,9 +76,13 @@ EOL
 }
 
 install_cross_compiler() {
-  local win32_gcc="cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-gcc"
-  if [[ -f $win32_gcc ]]; then
-    echo -e "MinGW-w64 compilers for Win32 already installed, not re-installing.\n"
+  # $mingw_w64_build_type/$mingw_arch_dir/$host_target are set from --arch= above (32 -> win32/i686, 64 -> win64/x86_64).
+  # The two arches' toolchains live in separate cross_compilers/mingw-w64-{i686,x86_64}/ subdirectories and don't
+  # collide, so all 32-bit CPU tiers share one toolchain build and both 64-bit tiers share the other -- only the
+  # per-tier dependency/FFmpeg build tree (win${target_arch}-${cpu_target_label}/, set up further below) differs.
+  local target_gcc="cross_compilers/${mingw_arch_dir}/bin/${host_target}-gcc"
+  if [[ -f $target_gcc ]]; then
+    echo -e "MinGW-w64 compilers for ${mingw_w64_build_type} already installed, not re-installing.\n"
   else
     mkdir -p cross_compilers
     cd cross_compilers
@@ -87,11 +91,11 @@ install_cross_compiler() {
       echo -e "Starting to download and build cross compile version of gcc [requires working internet access] with thread count $gcc_cpu_count.\n"
 
       # --disable-shared allows c++ to be distributed at all...which seemed necessary for some random dependency which happens to use/require c++...
-      echo "Building win32 cross compiler."
+      echo "Building ${mingw_w64_build_type} cross compiler."
       cp -v $patch_dir/mingw-w64-build-r33 .   # https://files.1f0.de/mingw/scripts/
-      ./mingw-w64-build-r33 --build-type=win32 --default-configure --cpu-count=$gcc_cpu_count --pthreads-w32-ver=2-9-1 --disable-shared --clean-build --verbose || exit 1
-      if [[ ! -f ../$win32_gcc ]]; then
-        echo "Failure building 32 bit gcc? Recommend nuke sandbox (rm -fr sandbox) and start over."
+      ./mingw-w64-build-r33 --build-type=$mingw_w64_build_type --default-configure --cpu-count=$gcc_cpu_count --pthreads-w32-ver=2-9-1 --disable-shared --clean-build --verbose || exit 1
+      if [[ ! -f ../$target_gcc ]]; then
+        echo "Failure building ${target_arch}-bit gcc? Recommend nuke sandbox (rm -fr sandbox) and start over."
         exit 1
       fi
 
@@ -276,7 +280,7 @@ do_ninja_install() {
 }
 
 do_make() {
-  local dir="${PWD/$cur_dir\/win32\/}"
+  local dir="${PWD/$cur_dir\/$build_subdir\/}"
   local make_options=(-j $cpu_count "$@")
   local name=$(get_small_touchfile_name already_ran_make "${make_options[@]}")
   if [ ! -f $name ]; then
@@ -300,7 +304,7 @@ do_make() {
 }
 
 do_make_install() {
-  local dir="${PWD/$cur_dir\/win32\/}"
+  local dir="${PWD/$cur_dir\/$build_subdir\/}"
   local make_install_options=(install "$@")
   local name=$(get_small_touchfile_name already_ran_make_install "${make_install_options[@]}")
   if [ ! -f $name ]; then
@@ -1605,6 +1609,7 @@ fi
 
 # variables with their defaults
 build_ffmpeg_static=y
+target_arch='32' # '32' (i686-w64-mingw32) or '64' (x86_64-w64-mingw32, for Windows XP x64 Edition / Server 2003). See --arch= below.
 original_cflags='-O2 -march=core2 -mtune=core2' # Targets Core 2 (e.g. Q6600): up to SSSE3, no SSE4.1/4.2/AVX. See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html, https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html and https://stackoverflow.com/questions/19689014/gcc-difference-between-o3-and-os.
 export ac_cv_func__mktemp_s=no   # _mktemp_s is not available on WinXP.
 export ac_cv_func_vsnprintf_s=no # Mark vsnprintf_s as unavailable, as windows xp mscrt doesn't have it.
@@ -1619,11 +1624,14 @@ while true; do
       --sandbox-ok=n [skip sandbox prompt if y]
       -d [meaning \"defaults\" skip all prompts, just build ffmpeg static with some reasonable defaults like no git updates]
       --cflags=[default is $original_cflags, which works on any cpu, see README for options]
+      --arch=[32 or 64, default is $target_arch -- 64 targets Windows XP x64 Edition/Server 2003, not regular 32-bit XP]
       --debug Make this script  print out each line as it executes
        "; exit 0 ;;
     --sandbox-ok=* ) sandbox_ok="${1#*=}"; shift ;;
     --cflags=* )
        original_cflags="${1#*=}"; echo "setting cflags as $original_cflags"; shift ;;
+    --arch=* )
+       target_arch="${1#*=}"; shift ;;
     -d         ) gcc_cpu_count=$cpu_count; sandbox_ok="y"; shift ;;
     --build-ffmpeg-static=* ) build_ffmpeg_static="${1#*=}"; shift ;;
     --debug ) set -x; shift ;;
@@ -1632,6 +1640,12 @@ while true; do
     * ) break ;;
   esac
 done
+
+case "$target_arch" in
+  32 ) host_target='i686-w64-mingw32';   mingw_w64_build_type='win32'; mingw_arch_dir='mingw-w64-i686';   arch_bits_label='32bit' ;;
+  64 ) host_target='x86_64-w64-mingw32'; mingw_w64_build_type='win64'; mingw_arch_dir='mingw-w64-x86_64'; arch_bits_label='64bit' ;;
+  * ) echo "Error: --arch must be 32 or 64, got '$target_arch'."; exit 1 ;;
+esac
 
 reset_cflags # also overrides any "native" CFLAGS, which we may need if there are some 'linux only' settings in there
 check_missing_packages # do this first since it's annoying to go through prompts then be rejected
@@ -1647,13 +1661,7 @@ cpu_target_label=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$original_cflags" | h
 cpu_target_label="${cpu_target_label:-generic}"
 
 original_path="$PATH"
-echo -e "Starting 32-bit builds.\n"
-host_target='i686-w64-mingw32'
-case "$host_target" in
-  i686*)   arch_bits_label="32bit" ;;
-  x86_64*) arch_bits_label="64bit" ;;
-  *)       arch_bits_label="unknown" ;;
-esac
+echo -e "Starting ${arch_bits_label} builds ($host_target, cpu tuning: $cpu_target_label).\n"
 target_suffix="winxp-${cpu_target_label}-${arch_bits_label}" # e.g. "winxp-core2-32bit". Shared by every packaged .7z below and the redist/ folder name itself.
 redist_dir="${redist_base_dir}/${build_timestamp}_ffmpeg-${ffmpeg_version_tag}_${target_suffix}"
 mkdir -p "$redist_dir"
@@ -1678,13 +1686,13 @@ Binaries in this build were verified with scripts/check-xp-compat.sh to
 import zero Windows Vista+-only Win32 APIs. That is a static/import-level
 check, not a substitute for an actual run on real XP hardware/a VM.
 BUILDINFOEOF
-mingw_w64_x86_64_prefix="$cur_dir/cross_compilers/mingw-w64-i686/$host_target"
-mingw_bin_path="$cur_dir/cross_compilers/mingw-w64-i686/bin"
+mingw_w64_x86_64_prefix="$cur_dir/cross_compilers/${mingw_arch_dir}/$host_target" # Variable name is legacy/misleading (kept as-is to avoid touching all 36+ build_X() references to it) -- holds whichever arch's ($target_arch) sysroot is actually active.
+mingw_bin_path="$cur_dir/cross_compilers/${mingw_arch_dir}/bin"
 export PKG_CONFIG_PATH="$mingw_w64_x86_64_prefix/lib/pkgconfig"
 export PATH="$mingw_bin_path:$original_path"
-cross_prefix="$mingw_bin_path/i686-w64-mingw32-"
+cross_prefix="$mingw_bin_path/${host_target}-"
 make_prefix_options="CC=${cross_prefix}gcc AR=${cross_prefix}ar PREFIX=$mingw_w64_x86_64_prefix RANLIB=${cross_prefix}ranlib LD=${cross_prefix}ld STRIP=${cross_prefix}strip CXX=${cross_prefix}g++"
-meson_cross_file="$cur_dir/meson-cross-mingw32.txt"
+meson_cross_file="$cur_dir/meson-cross-${host_target}.txt" # Filename is now arch-specific too, so concurrent/alternating 32- and 64-bit runs sharing the same $cur_dir don't clobber each other's cross-file mid-build.
 cat > "$meson_cross_file" <<EOF
 [binaries]
 c = '${cross_prefix}gcc'
@@ -1696,12 +1704,13 @@ pkgconfig = 'pkg-config'
 
 [host_machine]
 system = 'windows'
-cpu_family = 'x86'
-cpu = 'i686'
+cpu_family = '$([[ $target_arch == 64 ]] && echo x86_64 || echo x86)'
+cpu = '$([[ $target_arch == 64 ]] && echo x86_64 || echo i686)'
 endian = 'little'
 EOF
-mkdir -p win32
-cd win32
+build_subdir="win${target_arch}-${cpu_target_label}" # Tier+arch-specific dependency/FFmpeg build tree, e.g. "win32-pentium3" or "win64-sandybridge" -- keeps every CPU tier's compiled .a/.o files (which aren't binary-compatible across -march= flags) fully separate, while cross_compilers/ above stays shared per-arch.
+mkdir -p "$build_subdir"
+cd "$build_subdir"
   build_dependencies
   build_apps
 cd ..
