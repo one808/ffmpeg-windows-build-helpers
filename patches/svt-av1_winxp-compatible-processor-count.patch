@@ -1,0 +1,16 @@
+--- a/Source/Lib/Globals/enc_handle.c
++++ b/Source/Lib/Globals/enc_handle.c
+@@ -162,8 +162,12 @@
+
+ //Get Number of logical processors
+ static uint32_t get_num_processors() {
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+     return GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
++#elif defined(_WIN32)
++    SYSTEM_INFO sysinfo;
++    GetSystemInfo(&sysinfo);
++    return sysinfo.dwNumberOfProcessors;
+ #else
+     return sysconf(_SC_NPROCESSORS_ONLN);
+ #endif

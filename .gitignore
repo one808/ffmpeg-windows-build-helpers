@@ -3,6 +3,11 @@
 ffmpeg_local_builds/sandbox/
 redist/
 
+# Real Windows system DLLs used as a ground-truth reference by
+# scripts/check-xp-compat.sh --xp-system32=. Microsoft copyrighted
+# binaries -- never commit these, regardless of where you put them.
+ffmpeg_local_builds/xp-reference-dlls/
+
 # Container build context leftovers.
 *.tar
 

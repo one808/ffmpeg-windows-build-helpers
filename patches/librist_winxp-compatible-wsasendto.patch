@@ -1,0 +1,32 @@
+diff --git a/src/proto/gre.c b/src/proto/gre.c
+index e2b81e0..a08b7b2 100644
+--- a/src/proto/gre.c
++++ b/src/proto/gre.c
+@@ -183,21 +183,21 @@ ssize_t _librist_proto_gre_send_data(struct rist_peer *p, uint8_t payload_type,
+ 		}
+ 	} while (errorcode == EAGAIN && retries < RIST_MAX_SEND_RETRIES);
+ #else
+-	WSAMSG msghdr = { 0 };
++	/* WSASendMsg is Vista+ only (not exported by real Windows XP's ws2_32.dll); since this call never
++	 * uses WSAMSG's ancillary/control-data fields (it's plain scatter-gather-to-address, no IP_PKTINFO
++	 * etc.), WSASendTo -- a base Winsock2 function available since Windows 2000 -- covers the exact
++	 * same functionality without the newer-OS requirement. */
+ 	WSABUF iov[2];
+ 	DWORD dwBytes = 0;
+ 	iov[0].len = hdr_len;
+ 	iov[0].buf = (char *)hdr_buf;
+ 	iov[1].len = payload_len;
+ 	iov[1].buf = (char *)payload_wr;
+-	msghdr.name = (struct sockaddr *)&p->u.address;
+-	msghdr.namelen = p->address_len;
+-	msghdr.lpBuffers = iov;
+-	msghdr.dwBufferCount = 2;
+ 	ret = payload_len + hdr_len;
+ 	int retries = 0;
+ 	do {
+-		if (RIST_UNLIKELY(WSASendMsg(p->sd, &msghdr, MSG_DONTWAIT, &dwBytes, NULL, NULL) != 0)) {
++		if (RIST_UNLIKELY(WSASendTo(p->sd, iov, 2, &dwBytes, MSG_DONTWAIT,
++		                            (struct sockaddr *)&p->u.address, p->address_len, NULL, NULL) != 0)) {
+ 			ret = -1;
+ 			errorcode = WSAGetLastError();
+ 			retries++;

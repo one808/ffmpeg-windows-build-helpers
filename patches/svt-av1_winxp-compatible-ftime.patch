@@ -1,0 +1,14 @@
+--- a/Source/Lib/Codec/svt_time.c
++++ b/Source/Lib/Codec/svt_time.c
+@@ -38,7 +38,11 @@
+ void svt_av1_get_time(uint64_t* const seconds, uint64_t* const useconds) {
+ #ifdef _WIN32
+     struct _timeb curr_time;
++#if defined(_WIN32) && !defined(__MINGW32__)
+     _ftime_s(&curr_time);
++#else
++    _ftime(&curr_time);
++#endif
+     *seconds  = curr_time.time;
+     *useconds = curr_time.millitm * 1000;
+ #elif defined(CLOCK_MONOTONIC) && !defined(OLD_MACOS)

@@ -1,0 +1,14 @@
+diff --git a/src/udp.c b/src/udp.c
+index ff7634a..bf4944d 100755
+--- a/src/udp.c
++++ b/src/udp.c
+@@ -30,6 +30,9 @@
+ #include <stdint.h>
+ #include <assert.h>
+ #include <fcntl.h>
++#ifdef _WIN32
++#include "xp-inet-compat.h"
++#endif
+ 
+ /* EMSGSIZE-aware send-failure logger, rate-limited to one line per peer
+  * every 5 seconds to avoid drowning the log when the application is

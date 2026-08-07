@@ -1,0 +1,14 @@
+--- a/Source/Lib/Codec/svt_threads.c
++++ b/Source/Lib/Codec/svt_threads.c
+@@ -206,7 +206,11 @@
+         // the source doesn't fit, so truncate first.
+         char    truncated[16];
+         wchar_t wname[16];
++#if defined(_WIN32) && !defined(__MINGW32__)
+         strncpy_s(truncated, sizeof(truncated), name, sizeof(truncated) - 1);
++#else
++        strncpy(truncated, name, sizeof(truncated) - 1);
++#endif
+         truncated[sizeof(truncated) - 1] = '\0';
+         if (MultiByteToWideChar(CP_UTF8, 0, truncated, -1, wname, (int)(sizeof(wname) / sizeof(wname[0]))) > 0) {
+             // On Windows Server 2016, Windows 10 LTSB 2016 and Windows 10

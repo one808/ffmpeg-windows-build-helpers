@@ -70,6 +70,23 @@ later (`CancelIoEx`, `BCryptGenRandom`, `InitializeSRWLock`,
 static check, not a substitute for actually running the result on real XP
 (or an XP VM) -- see "What this doesn't catch" below.
 
+By default this is a hand-maintained blocklist -- accurate for everything
+that's bitten this build before, but not exhaustive by construction (it has
+already missed real cases twice: see git log). For a ground-truth check
+instead, pass `--xp-system32=DIR` pointing at a folder of real Windows XP
+system DLLs (`kernel32.dll`, `msvcrt.dll`, `advapi32.dll`, `user32.dll`,
+`ws2_32.dll`, ...); every imported symbol is then verified against that
+DLL's *actual* export table instead of against a list of known landmines.
+DLLs the `.exe` imports but that aren't present in `DIR` fall back to the
+blocklist, so a partial set still helps. **Never download these from
+"DLL download" sites** -- besides the copyright issue, that's one of the
+most common malware-distribution vectors around, and a doctored DLL would
+defeat the whole point of a ground-truth check. The only legitimate source
+is a real Windows XP install you're already licensed for: copy the DLLs
+from its `C:\Windows\system32\` yourself. Keep them out of version control
+(e.g. under the already-gitignored `ffmpeg_local_builds/xp-reference-dlls/`)
+-- they're Microsoft copyrighted binaries.
+
 ### `scripts/build.sh` options
 
 ```

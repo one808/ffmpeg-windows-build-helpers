@@ -1,0 +1,10 @@
+--- a/contrib/libudfread/src/udfread.c
++++ b/contrib/libudfread/src/udfread.c
+@@ -37,7 +37,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(__MINGW32__)
+ #define strtok_r strtok_s
+ #endif

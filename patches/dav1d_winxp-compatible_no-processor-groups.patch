@@ -1,0 +1,11 @@
+--- a/src/cpu.c
++++ b/src/cpu.c
+@@ -83,7 +83,7 @@
+
+ COLD int dav1d_num_logical_processors(Dav1dContext *const c) {
+ #ifdef _WIN32
+-#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
++#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) && !defined(__MINGW32__)
+     GROUP_AFFINITY affinity;
+     if (GetThreadGroupAffinity(GetCurrentThread(), &affinity)) {
+         int num_processors = 1;

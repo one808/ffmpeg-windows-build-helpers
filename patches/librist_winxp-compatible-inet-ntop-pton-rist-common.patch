@@ -1,0 +1,14 @@
+diff --git a/src/rist-common.c b/src/rist-common.c
+index 8866fee..4608d25 100755
+--- a/src/rist-common.c
++++ b/src/rist-common.c
+@@ -38,6 +38,9 @@
+ #include "stdio-shim.h"
+ #include <assert.h>
+ #include "proto/gre.h"
++#ifdef _WIN32
++#include "xp-inet-compat.h"
++#endif
+ 
+ static void rist_peer_recv(struct evsocket_ctx *evctx, int fd, short revents, void *arg, bool *again);
+ static void rist_peer_recv_wrap(struct evsocket_ctx *evctx, int fd, short revents, void *arg);

@@ -1009,6 +1009,12 @@ build_dav1d() {
     # (already linked elsewhere in this build, e.g. libssh) branch instead, same reasoning as the libwebp patches.
     apply_patch $patch_dir/dav1d_winxp-compatible_no-srwlock-win32-thread.patch -p1 # src/win32/thread.c is the
     # matching implementation file for the above (dav1d_pthread_create/join/once) -- same guard, same fix.
+    apply_patch $patch_dir/dav1d_winxp-compatible_no-processor-groups.patch -p1 # src/cpu.c unconditionally calls
+    # GetThreadGroupAffinity on any WINAPI_PARTITION_DESKTOP Windows build -- that's a Windows 7+-only kernel32
+    # export (processor groups), not merely Vista+; since it's a *statically* imported symbol, Windows refuses to
+    # load the entire .exe on XP ("procedure entry point ... could not be located") even though the code path is
+    # never reached at runtime. Route MinGW onto the same GetNativeSystemInfo fallback this file already uses for
+    # the non-desktop-partition case (available since XP).
     mkdir -p build_dir
     cd build_dir
       do_meson .. -Denable_tools=false -Denable_tests=false -Denable_examples=false
@@ -1031,6 +1037,21 @@ build_svtav1() {
     # complete, working POSIX pthread_mutex_t/pthread_cond_t/pthread_once_t implementation right next to it
     # for the non-Windows case. Route MinGW onto that existing pthread branch instead, same reasoning as dav1d.
     apply_patch $patch_dir/svt-av1_winxp-compatible-threads-impl.patch -p1 # Matching implementation in svt_threads.c (svt_create_cond_var/svt_set_cond_var/svt_wait_cond_var/svt_run_once) -- same guard, same fix.
+    apply_patch $patch_dir/svt-av1_winxp-compatible-processor-count.patch -p1 # Source/Lib/Globals/enc_handle.c's
+    # get_num_processors() unconditionally calls GetActiveProcessorCount -- a Windows 7+-only kernel32 export
+    # (processor groups), same class of bug as dav1d's GetThreadGroupAffinity fix above: a statically imported
+    # symbol the target DLL doesn't export blocks the whole .exe from loading on XP, not just that code path.
+    # Route MinGW onto a GetSystemInfo-based count instead (available since Windows 2000).
+    apply_patch $patch_dir/svt-av1_winxp-compatible-fopen.patch -p1 # Source/Lib/Codec/definitions.h's FOPEN macro
+    # unconditionally expands to fopen_s -- a "secure CRT" function from VC2005+ that Microsoft never backported
+    # into Windows XP's system msvcrt.dll (only into the newer, non-default msvcrt80/90/100+ redistributables).
+    # Route MinGW onto plain fopen instead, same as the non-Windows branch already does.
+    apply_patch $patch_dir/svt-av1_winxp-compatible-strncpy.patch -p1 # Source/Lib/Codec/svt_threads.c's
+    # SetThreadDescription helper calls strncpy_s -- same "secure CRT, not on XP's msvcrt.dll" issue as the
+    # FOPEN macro above. Route MinGW onto plain strncpy (the code already null-terminates manually right after).
+    apply_patch $patch_dir/svt-av1_winxp-compatible-ftime.patch -p1 # Source/Lib/Codec/svt_time.c's
+    # svt_av1_get_time() calls _ftime_s (mingw-w64's headers #define _ftime_s to _ftime32_s) -- same "secure CRT,
+    # not on XP's msvcrt.dll" issue. Route MinGW onto the plain _ftime, already used safely elsewhere (x264/x265).
     mkdir -p Build_cmake
     cd Build_cmake
       do_cmake ${PWD%/*} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DBUILD_DEC=ON -DBUILD_ENC=ON -DBUILD_TESTING=OFF
@@ -1055,6 +1076,19 @@ build_librist() {
   cd librist_git
     apply_patch $patch_dir/librist_winpthreads-scalar-pthread_t.patch -p1 # rist.c does "if (some_pthread_t)"; under winpthreads pthread_t is a struct (no implicit bool conversion), so this fails to compile ("used struct type value where scalar is required"). memcmp against a zeroed pthread_t works on both winpthreads and POSIX.
     apply_patch $patch_dir/librist_winxp-compatible-entropy.patch -p1 # src/crypto/random.c seeds its mbedTLS DRBG via BCryptGenRandom (bcrypt.dll / CNG) on _WIN32 unconditionally, regardless of the have_mingw_pthreads=true option above -- Vista+ only. Switch to the legacy CryptoAPI (CryptGenRandom), same fix as mbedtls's own entropy_poll.c patch.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton.patch -p1 # Adds src/xp-inet-compat.h: a
+    # from-scratch IPv4+IPv6 inet_ntop/inet_pton implementation for MinGW. mingw-w64's <ws2tcpip.h> declares
+    # both as plain DLL imports from ws2_32.dll regardless of target OS, but Windows XP's real ws2_32.dll never
+    # exported them (added in Vista) -- librist calls them unconditionally across several files, so the missing
+    # static import blocks the whole .exe from loading on XP entirely, not just RIST's IPv6 code path.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-tun_cidr.patch -p1 # src/tun_cidr.c: #include the new shim.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-udpsocket.patch -p1 # src/udpsocket.c: #include the new shim.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-udp.patch -p1 # src/udp.c: #include the new shim.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-rist-common.patch -p1 # src/rist-common.c: #include the new shim.
+    apply_patch $patch_dir/librist_winxp-compatible-wsasendto.patch -p1 # src/proto/gre.c calls WSASendMsg,
+    # another Vista+-only ws2_32.dll export not on real XP -- same static-import-blocks-load-entirely issue.
+    # This call never used WSAMSG's ancillary/control-data fields (no IP_PKTINFO etc.), so WSASendTo -- a base
+    # Winsock2 function available since Windows 2000 -- covers the exact same scatter-gather-to-address need.
     mkdir -p build_dir
     cd build_dir
       do_meson .. -Dtest=false -Dbuilt_tools=false -Dhave_mingw_pthreads=true # No 'http' option in this version; use_mbedtls already defaults to true, matching the mbedtls we already build.
@@ -1114,6 +1148,10 @@ build_chromaprint() {
 build_libbluray() {
   do_git_checkout https://code.videolan.org/videolan/libbluray.git libbluray_git "" 64bcf07f47452fb4724eef3febc40aaf7720d42a
   cd libbluray_git
+    apply_patch $patch_dir/libbluray_winxp-compatible-strtok.patch -p1 # contrib/libudfread/src/udfread.c
+    # unconditionally #defines strtok_r to strtok_s for _WIN32 -- a "secure CRT" function (VC2005+) never
+    # backported into Windows XP's system msvcrt.dll. mingw-w64 already provides a real strtok_r natively, so
+    # just let MinGW use that instead of rerouting to the missing secure variant.
     # Meson-only these days, no autotools left (no configure.ac).
     mkdir -p build_dir
     cd build_dir

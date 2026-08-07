@@ -1,0 +1,12 @@
+diff --git a/src/udpsocket.c b/src/udpsocket.c
+index 606e1dd..d483955 100644
+--- a/src/udpsocket.c
++++ b/src/udpsocket.c
+@@ -22,6 +22,7 @@
+ #ifndef SIO_UDP_CONNRESET
+ #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+ #endif
++#include "xp-inet-compat.h"
+ #endif
+ 
+ /* Private functions */
