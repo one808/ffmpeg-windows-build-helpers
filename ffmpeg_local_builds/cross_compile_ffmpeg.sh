@@ -654,7 +654,7 @@ build_fdk-aac() {
     do_make install-strip
 
     mkdir -p $redist_dir
-    archive="$redist_dir/libfdk-aac-$(git describe | tail -c +2 | sed 's/g//')-win32-xpmod-sse"
+    archive="$redist_dir/libfdk-aac-$(git describe | tail -c +2 | sed 's/g//')-${target_suffix}"
     if [[ ! -f $archive.7z ]]; then # Pack shared library.
       sed "s/$/\r/" NOTICE > NOTICE.txt
       7z a -mx=9 -bb3 $archive.7z $mingw_w64_x86_64_prefix/bin/libfdk-aac-2.dll NOTICE.txt
@@ -802,7 +802,7 @@ build_frei0r() {
     do_make -f Makefile install # frei0r's repo ships its own top-level 'GNUmakefile' (a ninja/build-dir wrapper); GNU Make prefers GNUmakefile over Makefile by default, silently shadowing the CMake-generated one, hence "No rule to make target 'install'" despite it existing.
 
     mkdir -p $redist_dir
-    archive="$redist_dir/frei0r-plugins-$(git describe --tags | tail -c +2 | sed 's/g//')-win32-xpmod-sse"
+    archive="$redist_dir/frei0r-plugins-$(git describe --tags | tail -c +2 | sed 's/g//')-${target_suffix}"
     if [[ ! -f $archive.7z ]]; then # Pack shared libraries.
       for doc in AUTHORS ChangeLog COPYING README.md; do
         sed "s/$/\r/" $doc > $mingw_w64_x86_64_prefix/lib/frei0r-1/$doc.txt
@@ -962,7 +962,7 @@ build_ffmpeg() {
     make -j $cpu_count || exit 1 # Build 'ffmpeg.exe', 'ffplay.exe' and 'ffprobe.exe' (+ '*.dll' for shared build). No install.
 
     mkdir -p $redist_dir
-    archive="$redist_dir/ffmpeg-$(git describe --tags | tail -c +2 | sed 's/dev-//;s/g//')-win32-$1-xpmod-sse"
+    archive="$redist_dir/ffmpeg-${ffmpeg_version_tag}-$1-${target_suffix}"
     if [[ $1 == "shared" ]]; then
       do_make_install
       if [[ ! -f $archive.7z ]]; then # Pack shared build.
@@ -1456,7 +1456,7 @@ build_openssl3() {
       do_make build_libs
 
       mkdir -p $redist_dir
-      archive="$redist_dir/openssl-3.6.3-win32-xpmod-sse"
+      archive="$redist_dir/openssl-3.6.3-${target_suffix}"
       if [[ ! -f $archive.7z ]]; then # Pack shared libraries.
         ${cross_prefix}strip -ps libcrypto-3.dll libssl-3.dll
         7z a -mx=9 -bb3 $archive.7z libcrypto-3.dll libssl-3.dll LICENSE.txt
@@ -1497,7 +1497,7 @@ build_curl() {
     do_make # 'curl.exe' only. No install.
 
     mkdir -p $redist_dir
-    archive="$redist_dir/curl-8.9.1-mbedtls-zlib-ssh2-win32-static-xpmod-sse"
+    archive="$redist_dir/curl-8.9.1-mbedtls-zlib-ssh2-static-${target_suffix}"
     if [[ ! -f $archive.7z ]]; then # Pack static 'curl.exe'.
       sed "s/$/\r/" COPYING > COPYING.txt
       7z a -mx=9 -bb3 $archive.7z ./src/curl.exe cacert.pem COPYING.txt
@@ -1516,7 +1516,7 @@ build_hlsdl() {
     LDFLAGS=-s do_make $make_prefix_options # Strip 'hlsdl.exe' during make.
 
     mkdir -p $redist_dir
-    archive="$redist_dir/hlsdl-$(grep -Po "(?<=hlsdl v)([0-9]+\.?)+" src/misc.c)-$(git rev-parse --short HEAD)-win32-static-xpmod-sse"
+    archive="$redist_dir/hlsdl-$(grep -Po "(?<=hlsdl v)([0-9]+\.?)+" src/misc.c)-$(git rev-parse --short HEAD)-static-${target_suffix}"
     if [[ ! -f $archive.7z ]]; then # Pack static 'hlsdl.exe'.
       sed "s/$/\r/" LICENSE > LICENSE.txt
       7z a -mx=9 -bb3 $archive.7z hlsdl.exe LICENSE.txt README.md
@@ -1554,11 +1554,11 @@ build_ffms2_cplugin() {
     rm -f NUL # Somehow this "file" is created and Windows Explorer can't delete it.
 
     mkdir -p $redist_dir
-    archive="$redist_dir/ffms2-$(git describe --tags | sed 's/g//')-avs-vsp_ffmpeg-$ff_rev-win32"
+    archive="$redist_dir/ffms2-$(git describe --tags | sed 's/g//')-avs-vsp_ffmpeg-$ff_rev"
     if [ "$1" = "static_ffmpeg" ]; then
-      archive="${archive}-static-xpmod-sse"
+      archive="${archive}-static-${target_suffix}"
     else
-      archive="${archive}-shared-xpmod-sse"
+      archive="${archive}-shared-${target_suffix}"
     fi
     if [[ ! -f $archive.7z ]]; then
       sed "s/$/\r/" etc/COPYING.GPLv3 > COPYING.GPLv3.txt
@@ -1574,11 +1574,21 @@ reset_cflags() {
   export CFLAGS=$original_cflags
 }
 
+finalize_redist() { # Called once at the very end, after build_apps (and whatever else) has had its chance to write into $redist_dir.
+  if compgen -G "$redist_dir/*.7z" > /dev/null; then
+    (cd "$redist_dir" && sha256sum -- *.7z > SHA256SUMS)
+  fi
+  echo -e "\e[1;33mRelease artifacts + BUILD_INFO.txt written to $redist_dir\e[0m"
+}
+
 # set some parameters initial values
 cur_dir="$PWD/sandbox"
 patch_dir="${PWD%/*}/patches"
-redist_dir="${PWD%/*}/redist"
+redist_base_dir="${PWD%/*}/redist" # Captured here (before intro() below does 'cd $cur_dir', which would shift $PWD by one level and break a later ${PWD%/*}-based computation) -- the final, dated $redist_dir gets built from this once host_target etc. are known.
 cpu_count=4 # Also drives every do_make's "-j $cpu_count", not just the gcc bootstrap; match this to the container's --cpus cap.
+build_timestamp=$(date +%Y_%m_%d_%H_%M_%S) # Captured once at script start, so every archive from this run lands in the same dated redist/ folder.
+build_timestamp_human=$(date +"%Y-%m-%d %H:%M:%S %Z") # Same moment, human-readable form for BUILD_INFO.txt.
+ffmpeg_version_tag="n8.1.2" # Keep in sync with the pinned commit in build_ffmpeg() below -- avoids a live 'git describe' at packaging time and lets the redist folder name be known before build_dependencies even starts (FFmpeg's own checkout, where 'git describe' would normally run, doesn't happen until build_apps, long after other archives may already need $redist_dir).
 
 set_box_memory_size_bytes
 if [[ $box_memory_size_bytes -lt 600000000 ]]; then
@@ -1630,9 +1640,44 @@ install_cross_compiler
 
 export PKG_CONFIG_LIBDIR= # disable pkg-config from finding [and using] normal linux system installed libs [yikes]
 
+# Short human-readable CPU-tuning label for release naming, e.g. "core2" out of "-O2 -march=core2 -mtune=core2".
+# Derived from $original_cflags (which --cflags= may have overridden above) rather than a separately-tracked
+# variable, so it can't drift out of sync with what was actually built.
+cpu_target_label=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$original_cflags" | head -1 | sed 's/^-march=//')
+cpu_target_label="${cpu_target_label:-generic}"
+
 original_path="$PATH"
 echo -e "Starting 32-bit builds.\n"
 host_target='i686-w64-mingw32'
+case "$host_target" in
+  i686*)   arch_bits_label="32bit" ;;
+  x86_64*) arch_bits_label="64bit" ;;
+  *)       arch_bits_label="unknown" ;;
+esac
+target_suffix="winxp-${cpu_target_label}-${arch_bits_label}" # e.g. "winxp-core2-32bit". Shared by every packaged .7z below and the redist/ folder name itself.
+redist_dir="${redist_base_dir}/${build_timestamp}_ffmpeg-${ffmpeg_version_tag}_${target_suffix}"
+mkdir -p "$redist_dir"
+cat > "$redist_dir/BUILD_INFO.txt" <<BUILDINFOEOF
+FFmpeg XP build -- build info
+==============================
+
+Build started:   $build_timestamp_human
+FFmpeg version:   $ffmpeg_version_tag (FFmpeg/FFmpeg.git, release/8.1 branch -- see cross_compile_ffmpeg.sh for the exact pinned commit)
+Target:           Windows XP (PE subsystem version <= 5.1), CPU tuning "$cpu_target_label", $arch_bits_label
+CFLAGS:           $original_cflags
+
+This is a from-source rebuild of every dependency (~63 libraries), each
+individually pinned to a specific commit/version and XP-compatibility
+patched where needed (routed off Windows Vista+-only APIs like SRWLOCK/
+CONDITION_VARIABLE/InitOnce*/BCryptGenRandom and onto POSIX pthreads /
+the legacy CryptoAPI). Full per-dependency version, pin date, and patch
+documentation: see DEPENDENCY_VERSIONS.md in the source repository
+(xp-core2 branch of ffmpeg-windows-build-helpers).
+
+Binaries in this build were verified with scripts/check-xp-compat.sh to
+import zero Windows Vista+-only Win32 APIs. That is a static/import-level
+check, not a substitute for an actual run on real XP hardware/a VM.
+BUILDINFOEOF
 mingw_w64_x86_64_prefix="$cur_dir/cross_compilers/mingw-w64-i686/$host_target"
 mingw_bin_path="$cur_dir/cross_compilers/mingw-w64-i686/bin"
 export PKG_CONFIG_PATH="$mingw_w64_x86_64_prefix/lib/pkgconfig"
@@ -1660,3 +1705,4 @@ cd win32
   build_dependencies
   build_apps
 cd ..
+finalize_redist

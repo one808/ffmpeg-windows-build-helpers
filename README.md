@@ -50,7 +50,12 @@ The finished binaries land at:
 ffmpeg_local_builds/sandbox/win32/FFmpeg_git/{ffmpeg,ffplay,ffprobe}.exe
 ```
 
-and a packaged release archive at `redist/ffmpeg-*-win32-static-xpmod-sse.7z`.
+and a packaged release archive at
+`redist/<timestamp>_ffmpeg-<version>_winxp-<cpu>-<bits>/ffmpeg-*-static-winxp-*.7z`
+-- each build run gets its own dated folder (e.g.
+`redist/2026_08_07_14_30_00_ffmpeg-n8.1.2_winxp-core2-32bit/`), containing a
+`BUILD_INFO.txt` (version/target/CFLAGS summary) and a `SHA256SUMS` alongside
+every `.7z` produced that run.
 
 `scripts/check-xp-compat.sh` inspects those `.exe` files' PE headers and
 import tables (via `objdump`, run inside the same podman image) and fails if
