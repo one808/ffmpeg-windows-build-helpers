@@ -1148,6 +1148,7 @@ build_chromaprint() {
 build_libbluray() {
   do_git_checkout https://code.videolan.org/videolan/libbluray.git libbluray_git "" 64bcf07f47452fb4724eef3febc40aaf7720d42a
   cd libbluray_git
+    git submodule update --init contrib/libudfread # contrib/libudfread is a submodule; --single-branch clone skips it.
     apply_patch $patch_dir/libbluray_winxp-compatible-strtok.patch -p1 # contrib/libudfread/src/udfread.c
     # unconditionally #defines strtok_r to strtok_s for _WIN32 -- a "secure CRT" function (VC2005+) never
     # backported into Windows XP's system msvcrt.dll. mingw-w64 already provides a real strtok_r natively, so
