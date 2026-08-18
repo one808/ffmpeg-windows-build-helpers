@@ -1,0 +1,87 @@
+name: Build FFmpeg XP
+
+on:
+  push:
+    branches: [xp-core2]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target architecture (32 or 64)'
+        default: '32'
+        type: string
+      tier:
+        description: 'CPU tier (e.g. core2, pentium3, nehalem)'
+        default: 'core2'
+        type: string
+      cflags:
+        description: 'Custom CFLAGS (leave empty for tier defaults)'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Free disk space
+        run: |
+          echo "=== Disk before cleanup ==="
+          df -h /
+          # Remove pre-installed software that eats ~30 GB
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/chromium
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo apt-get clean
+          echo "=== Disk after cleanup ==="
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build FFmpeg
+        id: build
+        run: |
+          ARCH="${{ inputs.arch || '32' }}"
+          TIER="${{ inputs.tier || 'core2' }}"
+          CFLAGS="${{ inputs.cflags }}"
+
+          ARGS="--arch=$ARCH --tier=$TIER --cpus=$(nproc)"
+          if [[ -n "$CFLAGS" ]]; then
+            ARGS="$ARGS --cflags='$CFLAGS'"
+          fi
+
+          echo "Starting build: arch=$ARCH tier=$TIER cpus=$(nproc)"
+          echo "::group::Podman build + FFmpeg compile"
+          # scripts/build.sh handles: podman image build, container create/resume,
+          # cross_compile_ffmpeg.sh invocation, and log capture.
+          # shellcheck disable=SC2086
+          scripts/build.sh $ARGS 2>&1
+          echo "::endgroup::"
+
+      - name: Check XP compatibility
+        if: steps.build.outcome == 'success'
+        run: |
+          TIER="${{ inputs.tier || 'core2' }}"
+          ARCH="${{ inputs.arch || '32' }}"
+          echo "::group::XP compat audit"
+          scripts/check-xp-compat.sh --target="win${ARCH}-${TIER}" 2>&1
+          echo "::endgroup::"
+
+      - name: Upload artifacts
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-winxp-${{ inputs.tier || 'core2' }}-${{ inputs.arch || '32' }}bit
+          path: redist/
+          retention-days: 30
+          if-no-files-found: warn
