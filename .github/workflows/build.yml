@@ -31,7 +31,6 @@ jobs:
         run: |
           echo "=== Disk before cleanup ==="
           df -h /
-          # Remove pre-installed software that eats ~30 GB
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
@@ -48,6 +47,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check environment
+        run: |
+          echo "--- podman ---"
+          podman --version || echo "PODMAN NOT FOUND"
+          echo "--- bash version ---"
+          bash --version | head -1
+          echo "--- scripts/build.sh ---"
+          ls -la scripts/build.sh
+          file scripts/build.sh
+          echo "--- repo root ---"
+          ls -la
+
       - name: Build FFmpeg
         id: build
         run: |
@@ -62,11 +73,12 @@ jobs:
 
           echo "Starting build: arch=$ARCH tier=$TIER cpus=$(nproc)"
           echo "::group::Podman build + FFmpeg compile"
-          # scripts/build.sh handles: podman image build, container create/resume,
-          # cross_compile_ffmpeg.sh invocation, and log capture.
           # shellcheck disable=SC2086
-          scripts/build.sh $ARGS 2>&1
+          bash scripts/build.sh $ARGS
+          EXIT_CODE=$?
           echo "::endgroup::"
+          echo "build.sh exited with code $EXIT_CODE"
+          exit $EXIT_CODE
 
       - name: Check XP compatibility
         if: steps.build.outcome == 'success'
@@ -74,7 +86,7 @@ jobs:
           TIER="${{ inputs.tier || 'core2' }}"
           ARCH="${{ inputs.arch || '32' }}"
           echo "::group::XP compat audit"
-          scripts/check-xp-compat.sh --target="win${ARCH}-${TIER}" 2>&1
+          bash scripts/check-xp-compat.sh --target="win${ARCH}-${TIER}"
           echo "::endgroup::"
 
       - name: Upload artifacts
