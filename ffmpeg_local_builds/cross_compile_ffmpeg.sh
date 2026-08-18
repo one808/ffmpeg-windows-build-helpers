@@ -560,7 +560,7 @@ build_fontconfig() {
 } # freetype, libxml >= 2.6, python >= 3, [iconv, dlfcn]
 
 build_gmp() {
-  download_and_unpack_file https://gmplib.org/download/gmp/gmp-6.3.0.tar.xz
+  download_and_unpack_file https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
   cd gmp-6.3.0
     if [[ ! -f Makefile.in.bak ]]; then # Library only.
       sed -i.bak "/^SUBDIRS/c\SUBDIRS = mpn mpz mpq mpf printf scanf rand cxx tune" Makefile.in
