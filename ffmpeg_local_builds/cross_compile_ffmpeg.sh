@@ -545,7 +545,7 @@ build_libxml2() {
 } # [zlib, liblzma, iconv, dlfcn]
 
 build_fontconfig() {
-  download_and_unpack_file https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.16.0.tar.xz # 2.18.x exists as a git tag but was never packaged as an official release tarball; 2.16.0 is the newest one actually published.
+  download_and_unpack_file https://ftp.osuosl.org/pub/blfs/conglomeration/fontconfig/fontconfig-2.16.0.tar.xz # 2.18.x exists as a git tag but was never packaged as an official release tarball; 2.16.0 is the newest one actually published.
   cd fontconfig-2.16.0
     if [[ ! -f Makefile.in.bak ]]; then
       cp Makefile.in Makefile.in.bak
