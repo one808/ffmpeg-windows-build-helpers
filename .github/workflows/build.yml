@@ -80,8 +80,38 @@ jobs:
           echo "build.sh exited with code $EXIT_CODE"
           exit $EXIT_CODE
 
+      - name: Diagnose build failure
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          TIER="${{ inputs.tier || 'core2' }}"
+          CONTAINER="ffmpeg-xp-${TIER}"
+          echo "::group::Diagnosing fontconfig/pkg-config issue"
+          # Try to exec into the existing container to inspect
+          if podman container exists "$CONTAINER" 2>/dev/null; then
+            echo "--- Container exists, inspecting ---"
+            PREFIX="/work/ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
+            podman start "$CONTAINER" 2>/dev/null || true
+            podman exec "$CONTAINER" bash -lc "
+              echo '=== fontconfig.pc ==='
+              find '$PREFIX' -name 'fontconfig.pc' 2>/dev/null || echo 'NOT FOUND'
+              echo '=== freetype2.pc ==='
+              find '$PREFIX' -name 'freetype2.pc' 2>/dev/null || echo 'NOT FOUND'
+              echo '=== all .pc files ==='
+              find '$PREFIX/lib/pkgconfig' -name '*.pc' 2>/dev/null | sort || echo 'pkgconfig dir empty/missing'
+              echo '=== PKG_CONFIG_PATH ==='
+              echo \$PKG_CONFIG_PATH
+              echo '=== pkg-config test ==='
+              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --exists fontconfig 2>&1 && echo 'fontconfig OK' || echo 'fontconfig FAILED'
+              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --exists freetype2 2>&1 && echo 'freetype2 OK' || echo 'freetype2 FAILED'
+              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --debug --exists fontconfig 2>&1 | tail -20
+            " 2>&1
+          else
+            echo "Container $CONTAINER does not exist."
+          fi
+          echo "::endgroup::"
+
       - name: Check XP compatibility
-        if: steps.build.outcome == 'success'
+        if: success()
         run: |
           TIER="${{ inputs.tier || 'core2' }}"
           ARCH="${{ inputs.arch || '32' }}"
@@ -90,7 +120,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Upload artifacts
-        if: steps.build.outcome == 'success'
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-winxp-${{ inputs.tier || 'core2' }}-${{ inputs.arch || '32' }}bit
