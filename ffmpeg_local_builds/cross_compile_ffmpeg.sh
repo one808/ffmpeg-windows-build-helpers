@@ -146,7 +146,21 @@ do_git_checkout() {
   if [ ! -d $dir ]; then
     rm -fr $dir.tmp # just in case it was interrupted previously...
     echo -e "\e[1;33mDownloading (git clone) $1 to $dir.\e[0m"
-    git clone --branch $branch --single-branch $1 $dir.tmp || exit 1
+    # Retry git clone with backoff -- some upstreams (e.g. code.videolan.org)
+    # are intermittently unreachable from CI runners; a single failure should
+    # not abort the entire build.
+    local clone_ok=0 max_attempts=5 attempt=0
+    while [[ $attempt -lt $max_attempts ]]; do
+      attempt=$((attempt + 1))
+      if git clone --branch "$branch" --single-branch "$1" "$dir.tmp" 2>/dev/null; then
+        clone_ok=1
+        break
+      fi
+      echo -e "\e[1;33m  git clone attempt $attempt/$max_attempts failed, retrying...\e[0m"
+      rm -fr "$dir.tmp"
+      sleep $((attempt * 5))
+    done
+    [[ $clone_ok -eq 0 ]] && { echo "fatal: git clone of $1 failed after $max_attempts attempts" >&2; exit 1; }
     # prevent partial checkouts by renaming it only after success
     mv $dir.tmp $dir
     if [[ $4 ]]; then

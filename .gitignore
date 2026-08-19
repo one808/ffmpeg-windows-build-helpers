@@ -13,3 +13,10 @@ ffmpeg_local_builds/xp-reference-dlls/
 
 # Build logs from scripts/build.sh.
 logs/
+
+
+# Generated wget wrapper (bypasses savannah 502).
+bin/
+
+# Pre-fetched config.guess fallback.
+patches/config.guess

@@ -83,6 +83,42 @@ inner_cmd="cd /work/ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbo
 
 mkdir -p logs
 
+# Pre-fetch config.guess before entering the container -- savannah.gnu.org is
+# intermittently 502. The container's network goes through pasta (IPv4-only) so
+# retries there are slow; we do them on the host first. Then we inject a wget
+# wrapper into the container's PATH so mingw-w64-build-r33's single-shot wget
+# for config.guess never hits the network.
+CONFIG_GUESS_URL='http://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
+if [[ ! -f patches/config.guess ]] || ! sh patches/config.guess >/dev/null 2>&1; then
+  echo "Pre-fetching config.guess (savannah may be flaky)..."
+  ./download_with_retry.sh "$CONFIG_GUESS_URL" patches/config.guess 18 10 || \
+    { echo "Fallback: using system config.guess" >&2; cp /usr/share/misc/config.guess patches/config.guess 2>/dev/null || true; }
+fi
+# Create a wget wrapper in a private bin/ that shadows /usr/bin/wget for this one URL.
+# mingw-w64-build-r33 calls: wget -nv -O config.guess '<savannah-url>'
+# The wrapper intercepts that exact call and writes the pre-fetched file instead.
+mkdir -p bin
+cat > bin/wget <<'WRAPPER'
+#!/usr/bin/env bash
+# Wrapped wget: serves cached config.guess from patches/, otherwise forwards to real wget.
+# Hardcoded path avoids recursion since this script shadows /usr/bin/wget in PATH.
+REAL_WGET=/usr/bin/wget
+OUT_FILE=""
+for arg in "$@"; do
+  if [[ "$arg" == http* ]] && [[ "$arg" == *config.guess* ]]; then
+    echo "[wget-wrapper] serving cached config.guess" >&2
+    cp /work/patches/config.guess "$OUT_FILE"
+    exit 0
+  fi
+  # Track -O <file> argument so we know where to write the cached copy.
+  if [[ "$arg" == "-O" ]]; then
+    OUT_FILE="${2:-}"
+  fi
+done
+exec "$REAL_WGET" "$@"
+WRAPPER
+chmod +x bin/wget
+
 if [[ "$rebuild_image" == 1 ]] || ! podman image exists "$IMAGE"; then
   echo "Building podman image $IMAGE from Containerfile..."
   podman build -t "$IMAGE" -f Containerfile .
@@ -102,8 +138,9 @@ else
   echo "Creating container $CONTAINER (cpus=$CPUS, arch=$ARCH${CFLAGS:+, cflags=$CFLAGS})..."
   podman run --name "$CONTAINER" --cpus="$CPUS" --network pasta:-4 \
     -v "$(pwd)":/work:Z \
+    -v "$(pwd)/bin:/work/bin:Z" \
     "$IMAGE" \
-    bash -lc "$inner_cmd" \
+    env PATH="/work/bin:$PATH" bash -lc "$inner_cmd" \
     2>&1 | tee "$LOG"
   status=$?
 fi
