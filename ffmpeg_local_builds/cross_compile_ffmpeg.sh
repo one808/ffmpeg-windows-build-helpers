@@ -146,9 +146,9 @@ do_git_checkout() {
   if [ ! -d $dir ]; then
     rm -fr $dir.tmp # just in case it was interrupted previously...
     echo -e "\e[1;33mDownloading (git clone) $1 to $dir.\e[0m"
-    # Retry git clone with backoff -- some upstreams (e.g. code.videolan.org)
-    # are intermittently unreachable from CI runners; a single failure should
-    # not abort the entire build.
+    # Retry git clone with backoff -- some upstreams are intermittently
+    # unreachable from CI runners (e.g. gitlab.com SVT-AV1); a single failure
+    # should not abort the entire build.
     local clone_ok=0 max_attempts=5 attempt=0
     while [[ $attempt -lt $max_attempts ]]; do
       attempt=$((attempt + 1))
@@ -1043,7 +1043,7 @@ build_dav1d() {
 } # Fast AV1 decoder (meson).
 
 build_svtav1() {
-  do_git_checkout https://github.com/one808/SVT-AV1.git SVT-AV1_git "" 13438c1f4386ac96b4be1d9a8a9b9184f64a55f3
+  do_git_checkout https://gitlab.com/AOMediaCodec/SVT-AV1.git SVT-AV1_git "" 13438c1f4386ac96b4be1d9a8a9b9184f64a55f3
   cd SVT-AV1_git
     apply_patch $patch_dir/svt-av1_winxp-compatible-threads.patch -p1 # Source/Lib/Codec/svt_threads.h's CondVar
     # struct and OnceType typedef unconditionally use native CRITICAL_SECTION+CONDITION_VARIABLE / INIT_ONCE
