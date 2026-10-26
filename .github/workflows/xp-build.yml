@@ -1,0 +1,149 @@
+# Build Windows-XP-compatible FFmpeg on GitHub Actions (native Linux runner,
+# no container), then statically audit the result for XP safety.
+#
+# The build (cross GCC toolchain + ~63 pinned deps + FFmpeg) takes several
+# hours, longer than a single comfortable job, so it runs as N sequential
+# stages in one run. Every stage is time-boxed; when its budget runs out the
+# next stage resumes from the shared `ffmpeg_local_builds/sandbox` cache (the
+# build script marks finished deps with touchfiles and skips them).
+# Order of stages is irrelevant - each stage is just "continue building".
+#
+# Trigger with Run workflow. Inputs:
+#   arch              32 = real 32-bit XP (default), 64 = XP x64 / Server 2003
+#   minutes_per_stage build minutes per stage (default 300; 4 stages = 20h/run)
+name: XP build (win32-core2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "--arch: 32 = real XP, 64 = XP x64 / Server 2003"
+        default: "32"
+      minutes_per_stage:
+        description: "Build minutes per stage (stages chain via cache)"
+        default: "300"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xp-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355 # hard job ceiling (GitHub max 360) > minutes_per_stage + setup
+    strategy:
+      max-parallel: 1 # stages must run one at a time: they share the sandbox cache
+      fail-fast: false
+      matrix:
+        stage: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /opt/hostedtoolcache 2>/dev/null || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            p7zip-full autoconf autogen automake bison bzip2 cmake cvs ed flex git gperf \
+            libtool libtool-bin make texinfo patch pax pkg-config subversion unzip wget \
+            xz-utils yasm mercurial meson ninja-build nasm gettext autopoint curl ca-certificates \
+            gcc-12 g++-12
+          # gcc-12/g++-12 = same host-compiler major as the Debian 12 image this fork is
+          # tested with inside its podman container; keeps the GCC 10.4 cross-toolchain
+          # build away from any too-new-host-compiler breakage.
+          gcc-12 --version | head -1
+
+      - name: Restore build sandbox (rolling cache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ffmpeg_local_builds/sandbox
+            redist
+          key: sandbox-${{ github.run_id }}-${{ matrix.stage }}
+          restore-keys: |
+            sandbox-${{ github.run_id }}-
+            sandbox-
+
+      - name: "Build stage ${{ matrix.stage }} (resumable, time-boxed)"
+        env:
+          CC: gcc-12
+          CXX: g++-12
+        run: |
+          set -uo pipefail
+          mkdir -p logs
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete ]] || compgen -G "redist/*/*.7z" >/dev/null; then
+            echo "Build already complete - nothing to do."; exit 0
+          fi
+          ARCH="${{ inputs.arch }}"
+          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH, budget ${{ inputs.minutes_per_stage }}m =="
+          timeout --signal=TERM --kill-after=90 "${{ inputs.minutes_per_stage }}m" \
+            bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH" \
+            2>&1 | tee "logs/stage-${{ matrix.stage }}-arch$ARCH.log"
+          status=${PIPESTATUS[0]}
+          if [[ $status -eq 0 ]]; then
+            touch ffmpeg_local_builds/sandbox/.build-complete
+            echo "== build completed in stage ${{ matrix.stage }} =="
+          elif [[ $status -eq 124 ]]; then
+            echo "== stage ${{ matrix.stage }} time budget exhausted; next stage resumes from cache =="
+          else
+            echo "::error::build failed (exit $status) in stage ${{ matrix.stage }}"
+            exit "$status"
+          fi
+
+      # Same two checks scripts/check-xp-compat.sh performs (PE subsystem version
+      # ceiling + Vista+-only imported symbols), minus that script's podman wrapper
+      # -- the freshly built cross-objdump runs natively on the runner. Blocklist
+      # regex kept in sync with scripts/check-xp-compat.sh.
+      - name: XP compatibility audit (static import check)
+        if: always()
+        run: |
+          set -uo pipefail
+          ARCH="${{ inputs.arch }}"
+          if [[ "$ARCH" == "64" ]]; then
+            OBJDUMP=ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/bin/x86_64-w64-mingw32-objdump
+            MAJ=5; MIN=2  # XP x64 Edition / Server 2003 = NT 5.2
+          else
+            OBJDUMP=ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-objdump
+            MAJ=5; MIN=1  # real 32-bit XP = NT 5.1
+          fi
+          [[ -x "$OBJDUMP" ]] || { echo "objdump not built yet (no toolchain in cache) - skipping audit"; exit 0; }
+          BLOCKLIST='\<(CancelIoEx|BCryptGenRandom|BCryptOpenAlgorithmProvider|BCryptCloseAlgorithmProvider|InitOnceExecuteOnce|InitOnceBeginInitialize|InitOnceComplete|InitializeSRWLock|AcquireSRWLockExclusive|AcquireSRWLockShared|ReleaseSRWLockExclusive|ReleaseSRWLockShared|TryAcquireSRWLockExclusive|TryAcquireSRWLockShared|InitializeConditionVariable|WakeConditionVariable|WakeAllConditionVariable|SleepConditionVariableCS|SleepConditionVariableSRW|GetTickCount64|CreateSymbolicLinkA|CreateSymbolicLinkW|SetThreadDescription|GetFileInformationByHandleEx|SetFileInformationByHandle|GetLogicalProcessorInformation|GetLogicalProcessorInformationEx|K32EnumProcesses|CreateWaitableTimerExA|CreateWaitableTimerExW|GetSystemTimePreciseAsFileTime|WSAPoll|GetAddrInfoExA|GetAddrInfoExW|inet_ntop|inet_pton|WSASendMsg|GetActiveProcessorCount|GetActiveProcessorGroupCount|GetMaximumProcessorCount|GetThreadGroupAffinity|SetThreadGroupAffinity|GetNumaProcessorNodeEx|GetNumaNodeProcessorMaskEx|GetNumaHighestNodeNumberEx|CreateFile2|InitializeProcThreadAttributeList|UpdateProcThreadAttribute|IsWow64Process2|[a-zA-Z_][a-zA-Z0-9_]*_s)\>'
+          fail=0
+          for exe in ffmpeg.exe ffplay.exe ffprobe.exe; do
+            f="ffmpeg_local_builds/sandbox/win$ARCH-core2/FFmpeg_git/$exe"
+            if [[ ! -f "$f" ]]; then echo "SKIP $exe (not built yet)"; continue; fi
+            echo "== $exe =="
+            dump=$("$OBJDUMP" -p "$f")
+            major=$(grep -m1 -i MajorSubsystemVersion <<<"$dump" | awk '{print $2}')
+            minor=$(grep -m1 -i MinorSubsystemVersion <<<"$dump" | awk '{print $2}')
+            echo "  PE subsystem version: $major.$minor (ceiling: $MAJ.$MIN)"
+            if (( major > MAJ || (major == MAJ && minor > MIN) )); then
+              echo "  FAIL: subsystem version exceeds XP"; fail=1
+            fi
+            hits=$(grep -oE "$BLOCKLIST" <<<"$dump" | sort -u || true)
+            if [[ -n "$hits" ]]; then
+              echo "  FAIL: Vista+-only import(s):"; sed 's/^/    /' <<<"$hits"; fail=1
+            else
+              echo "  OK: no known Vista+-only imports."
+            fi
+          done
+          exit $fail
+
+      - name: Upload release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-winxp-arch${{ inputs.arch }}-stage${{ matrix.stage }}
+          path: |
+            redist/**
+            logs/**
+          if-no-files-found: warn
+          retention-days: 30

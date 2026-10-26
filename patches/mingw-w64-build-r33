@@ -566,7 +566,7 @@ build_binutils () {
 cd "$pkgs_dir" || print_error
 create_pkg_dirs 'binutils' || print_error
 if [[ "$binutils_ver" != 'git' ]]; then
-  download_extract "http://ftp.gnu.org/gnu/binutils/binutils-$binutils_ver.tar.bz2" "ftp://ftp.gnu.org/gnu/binutils/binutils-$binutils_ver.tar.bz2"
+  download_extract "http://ftp.gnu.org/gnu/binutils/binutils-$binutils_ver.tar.bz2" "https://ftp.gnu.org/gnu/binutils/binutils-$binutils_ver.tar.bz2"
 else
   git_dl "binutils" "git://sourceware.org/git/binutils-gdb.git"
 fi
@@ -692,11 +692,11 @@ std_compile 'mpfr' "$mpfr_release_ver" "http://ftp.gnu.org/gnu/mpfr/mpfr-$mpfr_r
 std_compile 'mpc' "$mpc_release_ver" "http://ftp.gnu.org/gnu/mpc/mpc-$mpc_release_ver.tar.gz" "../source/mpc-$mpc_release_ver/configure" --build="$system_type" --prefix="$mpc_prefix" $gcc_host --with-gmp="$gmp_prefix" --with-mpfr="$mpfr_prefix" --disable-shared --enable-static
 
 #build isl
-std_compile 'isl' "$isl_ver" "ftp://gcc.gnu.org/pub/gcc/infrastructure/isl-$isl_ver.tar.bz2" "../source/isl-$isl_ver/configure" --prefix="$isl_prefix" --build="$system_type" $gcc_host --enable-static --disable-shared --with-gmp-prefix="$gmp_prefix" --with-piplib=no --with-clang=no
+std_compile 'isl' "$isl_ver" "https://gcc.gnu.org/pub/gcc/infrastructure/isl-$isl_ver.tar.bz2" "../source/isl-$isl_ver/configure" --prefix="$isl_prefix" --build="$system_type" $gcc_host --enable-static --disable-shared --with-gmp-prefix="$gmp_prefix" --with-piplib=no --with-clang=no
 
 #build cloog
 if [[ "$gcc_ver" = "$gcc_old_release_ver" ]]; then
-  std_compile 'cloog' "$cloog_ver" "ftp://gcc.gnu.org/pub/gcc/infrastructure/cloog-$cloog_ver.tar.gz" "../source/cloog-$cloog_ver/configure" --prefix="$cloog_prefix" --build="$system_type" $gcc_host --enable-static --disable-shared --with-bits=gmp --with-isl=bundled --with-gmp-prefix="$gmp_prefix"
+  std_compile 'cloog' "$cloog_ver" "https://gcc.gnu.org/pub/gcc/infrastructure/cloog-$cloog_ver.tar.gz" "../source/cloog-$cloog_ver/configure" --prefix="$cloog_prefix" --build="$system_type" $gcc_host --enable-static --disable-shared --with-bits=gmp --with-isl=bundled --with-gmp-prefix="$gmp_prefix"
 fi
 
 export CC="$old_cc"
@@ -706,7 +706,7 @@ cd "$pkgs_dir" || print_error
 create_pkg_dirs 'gcc'
 cd "$pkgs_dir/gcc/source" || print_error
 if [[ "$gcc_ver" != 'svn' ]]; then
-  download_extract "http://ftp.gnu.org/gnu/gcc/gcc-$gcc_ver/gcc-$gcc_ver.tar.xz" "ftp://ftp.gnu.org/gnu/gcc/gcc-$gcc_ver/gcc-$gcc_ver.tar.xz"
+  download_extract "http://ftp.gnu.org/gnu/gcc/gcc-$gcc_ver/gcc-$gcc_ver.tar.xz" "https://ftp.gnu.org/gnu/gcc/gcc-$gcc_ver/gcc-$gcc_ver.tar.xz"
 else
   if cd 'gcc-svn' 2>/dev/null; then
     build_progress 'gcc-svn' 'Updating'
@@ -907,7 +907,7 @@ cd "$pkgs_dir" || print_error
 create_pkg_dirs 'pthread-w32' || print_error
 
 if [[ "$pthreads_w32_ver" = "$pthreads_w32_release_ver" ]]; then
-  download_extract "ftp://sourceware.org/pub/pthreads-win32/pthreads-w32-$pthreads_w32_release_ver-release.tar.gz"
+  download_extract "https://sourceware.org/pub/pthreads-win32/pthreads-w32-$pthreads_w32_release_ver-release.tar.gz"
   if [[ ! -d "pthreads-w32-$pthreads_w32_release_ver" ]]; then
     mv "pthreads-w32-$pthreads_w32_release_ver-release" "pthreads-w32-$pthreads_w32_release_ver" || print_error
   fi
