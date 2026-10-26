@@ -1,8 +1,10 @@
 name: Build FFmpeg XP
 
 on:
-  push:
-    branches: [xp-core2]
+  # push trigger disabled 2026-10-26: xp-build.yml now owns CI for xp-core2.
+  # This podman-based pipeline stays available for manual runs as a fallback.
+  # push:
+  #   branches: [xp-core2]
   workflow_dispatch:
     inputs:
       arch:
@@ -86,25 +88,38 @@ jobs:
           TIER="${{ inputs.tier || 'core2' }}"
           CONTAINER="ffmpeg-xp-${TIER}"
           echo "::group::Diagnosing fontconfig/pkg-config issue"
-          # Try to exec into the existing container to inspect
+          # Write a diagnostic script into the bind-mounted repo dir (/work in the
+          # container) so we avoid nested-quote hell, then run it inside the container.
+          cat > fontconfig_diag.sh <<'DIAGEOF'
+          #!/usr/bin/env bash
+          set +e
+          PREFIX="/work/ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG_LIBDIR=
+          CROSS="$PREFIX/bin/i686-w64-mingw32-"
+          echo "=== fontconfig.pc ==="; cat "$PREFIX/lib/pkgconfig/fontconfig.pc" 2>/dev/null || echo NOTFOUND
+          echo "=== libxml-2.0.pc ==="; cat "$PREFIX/lib/pkgconfig/libxml-2.0.pc" 2>/dev/null || echo NOTFOUND
+          echo "=== freetype2.pc ==="; cat "$PREFIX/lib/pkgconfig/freetype2.pc" 2>/dev/null || echo NOTFOUND
+          echo "=== pkg-config --static --cflags --libs fontconfig ==="
+          pkg-config --static --cflags --libs fontconfig; echo "exit=$?"
+          echo "=== pkg-config --static --print-requires fontconfig ==="
+          pkg-config --static --print-requires fontconfig; echo "exit=$?"
+          echo "=== pkg-config --static --print-requires-private fontconfig ==="
+          pkg-config --static --print-requires-private fontconfig; echo "exit=$?"
+          echo "=== manual link test (mimic require_pkg_config FcInit) ==="
+          printf '#include <fontconfig/fontconfig.h>\nint main(void){ FcInit(); return 0; }\n' > /tmp/fc_probe.c
+          ${CROSS}gcc -c /tmp/fc_probe.c -o /tmp/fc_probe.o $(pkg-config --static --cflags fontconfig) 2>&1; echo "compile exit=$?"
+          ${CROSS}gcc /tmp/fc_probe.o -o /tmp/fc_probe.exe $(pkg-config --static --libs fontconfig) -lssp 2>&1; echo "link exit=$?"
+          echo "=== FFmpeg ffbuild/config.log (fontconfig section) ==="
+          FLOG=$(find /work/ffmpeg_local_builds -path '*FFmpeg_git/ffbuild/config.log' 2>/dev/null | head -1)
+          if [[ -n "$FLOG" ]]; then grep -in -A6 -B2 'fontconfig\|FcInit\|undefined reference' "$FLOG" | head -120; else echo 'config.log not found'; fi
+          echo "=== which libs exist in prefix/lib ==="
+          ls "$PREFIX/lib"/lib{fontconfig,freetype,xml2,lzma,z,iconv,pthread,ws2_32}* 2>/dev/null
+          DIAGEOF
           if podman container exists "$CONTAINER" 2>/dev/null; then
             echo "--- Container exists, inspecting ---"
-            PREFIX="/work/ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
             podman start "$CONTAINER" 2>/dev/null || true
-            podman exec "$CONTAINER" bash -lc "
-              echo '=== fontconfig.pc ==='
-              find '$PREFIX' -name 'fontconfig.pc' 2>/dev/null || echo 'NOT FOUND'
-              echo '=== freetype2.pc ==='
-              find '$PREFIX' -name 'freetype2.pc' 2>/dev/null || echo 'NOT FOUND'
-              echo '=== all .pc files ==='
-              find '$PREFIX/lib/pkgconfig' -name '*.pc' 2>/dev/null | sort || echo 'pkgconfig dir empty/missing'
-              echo '=== PKG_CONFIG_PATH ==='
-              echo \$PKG_CONFIG_PATH
-              echo '=== pkg-config test ==='
-              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --exists fontconfig 2>&1 && echo 'fontconfig OK' || echo 'fontconfig FAILED'
-              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --exists freetype2 2>&1 && echo 'freetype2 OK' || echo 'freetype2 FAILED'
-              PKG_CONFIG_PATH='$PREFIX/lib/pkgconfig' pkg-config --debug --exists fontconfig 2>&1 | tail -20
-            " 2>&1
+            podman exec "$CONTAINER" bash /work/fontconfig_diag.sh 2>&1
           else
             echo "Container $CONTAINER does not exist."
           fi
