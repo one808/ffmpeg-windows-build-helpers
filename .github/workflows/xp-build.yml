@@ -201,13 +201,49 @@ jobs:
           done
           exit $fail
 
-      - name: Upload release artifacts
+      # Collect just the finished release folder -- redist/ accumulates stale
+      # timestamped dirs from earlier runs via the cache, and dep builds (libfdk-aac,
+      # frei0r) drop their own .7z packages there, so upload precisely the folder that
+      # contains the finished FFmpeg package and name the artifact after it.
+      - name: Collect release files
+        id: collect
         if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts-out
+          for d in redist/*/; do
+            if compgen -G "$d*static-winxp-*.7z" >/dev/null; then
+              cp -a "${d%/}"/. artifacts-out/
+            fi
+          done
+          pkg=$(ls artifacts-out/ffmpeg-*-static-winxp-*.7z 2>/dev/null | head -1)
+          if [[ -n "$pkg" ]]; then
+            echo "name=$(basename "$pkg" .7z)" >> "$GITHUB_OUTPUT"
+            echo "Collected release files:"; ls -la artifacts-out/
+          else
+            echo "No finished FFmpeg package in this stage - nothing to collect."
+          fi
+
+      # One artifact per run, named exactly like the package inside it
+      # (e.g. "ffmpeg-n8.1.2-static-winxp-core2-32bit"). overwrite handles the
+      # harmless case where several stages see the finished cache and collect
+      # the same folder.
+      - name: Upload release artifact
+        if: always() && steps.collect.outputs.name != ''
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-winxp-arch${{ inputs.arch }}-stage${{ matrix.stage }}
-          path: |
-            redist/**
-            logs/**
-          if-no-files-found: warn
+          name: ${{ steps.collect.outputs.name }}
+          overwrite: true
+          path: artifacts-out/**
           retention-days: 30
+
+      # Only when there is no finished package (i.e. a failed build) is a
+      # stage-logs artifact uploaded, purely for debugging.
+      - name: Upload build logs (no finished package)
+        if: always() && steps.collect.outputs.name == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-arch${{ inputs.arch }}-stage${{ matrix.stage }}
+          path: logs/**
+          if-no-files-found: warn
+          retention-days: 14
