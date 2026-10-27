@@ -992,7 +992,7 @@ build_ffmpeg() {
     apply_patch $patch_dir/0004-load-shared-libfdk-aac-library-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0004-dynamic-loading-of-shared-fdk-aac-library.patch.
     apply_patch $patch_dir/0004b-load-shared-libfdk-aac-configure-rebase.patch -p1 # 0004's own configure hunks bit-rotted (context changed too much for fuzzy matching, e.g. a new neighboring 'libmpeghdec' nonfree entry) between the old pinned FFmpeg commit and n8.1.2; same semantic change, rebased.
     apply_patch $patch_dir/0005-load-shared-frei0r-libraries-dynamically.patch -p1 # See https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0005-avfilters-better-behavior-of-frei0r-on-win32.patch.
-    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS" --extra-libs=-lssp --extra-ldflags=-Wl,--allow-multiple-definition) # '-lssp': some static deps (e.g. libmp3lame) are built with stack-protector, referencing __stack_chk_guard/__stack_chk_fail from libssp.a; without it explicitly on the link line, FFmpeg's own configure lib-detection link tests (and the final link) fail with "undefined reference". '--allow-multiple-definition': libssh and librist each vendor their own MinGW gettimeofday() shim (MSVCRT doesn't provide one) under the same symbol name, which collide at final-link time; both implementations are equivalent GetSystemTimeAsFileTime()-based polyfills, so it's safe to just let the linker keep whichever it sees first.
+    init_options=(--arch=x86 --target-os=mingw32 --prefix=$mingw_w64_x86_64_prefix --cross-prefix=$cross_prefix --extra-cflags="$CFLAGS" '--extra-libs=-lssp -lpthread' --extra-ldflags=-Wl,--allow-multiple-definition) # '-lssp': some static deps (e.g. libmp3lame) are built with stack-protector, referencing __stack_chk_guard/__stack_chk_fail from libssp.a; without it explicitly on the link line, FFmpeg's own configure lib-detection link tests (and the final link) fail with "undefined reference". '-lpthread': several XP-compat thread patches (libxml2, SVT-AV1, libwebp, dav1d) route those libs onto pthreads-win32, but their generated .pc files don't all record the pthread link flag (e.g. libxml2's mingw configure unconditionally assumes native Win32 threads), so FFmpeg's link tests and the final link hit "undefined reference to pthread_*" -- misleadingly reported as "<pkg> not found using pkg-config". extralibs is appended to every configure link test (test_ld) and the final link, after the pkg-config libs, so this covers every such dependency at once. '--allow-multiple-definition': libssh and librist each vendor their own MinGW gettimeofday() shim (MSVCRT doesn't provide one) under the same symbol name, which collide at final-link time; both implementations are equivalent GetSystemTimeAsFileTime()-based polyfills, so it's safe to just let the linker keep whichever it sees first.
     if [[ $1 == "shared" ]]; then
       init_options+=(--enable-shared --disable-static) # Building a static FFmpeg is the default, so no need to specify '--enable-static --disable-shared'.
     fi
@@ -1098,6 +1098,14 @@ build_svtav1() {
     cd Build_cmake
       do_cmake ${PWD%/*} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_APPS=OFF -DBUILD_DEC=ON -DBUILD_ENC=ON -DBUILD_TESTING=OFF
       do_make install
+      # Same .pc gap as libxml2 above: the threads patch routes SVT-AV1 onto pthreads-win32, but
+      # SvtAv1Enc.pc doesn't record -lpthread, so FFmpeg's libsvtav1 link test dies with
+      # "undefined reference to `pthread_once'" (its LTO build hides which .o needs it from nm).
+      # FFmpeg itself now gets -lpthread via --extra-libs; this keeps the .pc honest for any
+      # other consumer too. Idempotent, and runs even when 'make install' is skipped on resume.
+      if [[ -f $mingw_w64_x86_64_prefix/lib/pkgconfig/SvtAv1Enc.pc ]] && ! grep -q -- '-lpthread' $mingw_w64_x86_64_prefix/lib/pkgconfig/SvtAv1Enc.pc; then
+        sed -i 's/^Libs: \(.*\)$/Libs: \1 -lpthread/' $mingw_w64_x86_64_prefix/lib/pkgconfig/SvtAv1Enc.pc
+      fi
     cd ..
   cd ..
 } # Fast AV1 encoder (cmake).
