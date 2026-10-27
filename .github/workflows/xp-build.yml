@@ -84,7 +84,10 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p logs
-          if [[ -f ffmpeg_local_builds/sandbox/.build-complete ]] || compgen -G "redist/*/*.7z" >/dev/null; then
+          # Completion = the *FFmpeg* static package exists (deps like libfdk-aac/frei0r also
+          # drop their own .7z packages into redist/ as they build, so a loose *.7z glob here
+          # would falsely mark a half-finished build as done).
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete ]] || compgen -G "redist/*/ffmpeg-*-static-winxp-*.7z" >/dev/null; then
             echo "Build already complete - nothing to do."; exit 0
           fi
           ARCH="${{ inputs.arch }}"
@@ -118,7 +121,7 @@ jobs:
       - name: Diagnose failure (config.log + pkg-config + manual link test)
         if: failure()
         run: |
-          set -uo pipefail
+          set +e -u  # diagnostics must never fail the step themselves
           ARCH="${{ inputs.arch }}"
           PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
           CROSS="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-gcc"
@@ -147,8 +150,8 @@ jobs:
           int main(void){ void *p = (void*)(intptr_t)FcInit; (void)p; return 0; }
           EOF
             sed -i 's/^          //' t_fcprobe.c
-            FCFLAGS=$(pkg-config --static --cflags fontconfig 2>/dev/null)
-            FCLIBS=$(pkg-config --static --libs fontconfig 2>/dev/null)
+            FCFLAGS=$(pkg-config --static --cflags fontconfig 2>/dev/null) || true
+            FCLIBS=$(pkg-config --static --libs fontconfig 2>/dev/null) || true
             echo "+ $CROSS $FCFLAGS t_fcprobe.c $FCLIBS -lssp -o t_fcprobe.exe"
             "$CROSS" $FCFLAGS t_fcprobe.c $FCLIBS -lssp -o t_fcprobe.exe 2>&1 | tail -40
             echo "(exit ${PIPESTATUS[0]})"

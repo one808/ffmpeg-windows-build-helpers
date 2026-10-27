@@ -555,6 +555,19 @@ build_libxml2() {
     apply_patch $patch_dir/libxml2_winxp-compatible-entropy.patch -p1 # dict.c's xmlInitRandom() calls BCryptGenRandom (bcrypt.dll / CNG) unconditionally on _WIN32 -- Vista+ only. Switch to the legacy CryptoAPI (CryptGenRandom), same fix as mbedtls's and librist's own entropy sources.
     LDFLAGS=-pthread generic_configure --with-ftp=no --with-http=no --with-python=no # Now that threads.h (patched above) routes to real pthreads-win32, both libxml2.a itself and its bundled xmllint/xmlcatalog tools need '-pthread' on the link line -- same story as libssh/librist/dav1d's own '-pthread' fixes elsewhere in this build.
     do_make install
+    # The threads patch routes libxml2 onto pthreads-win32, but configure's *mingw* branch
+    # unconditionally assumes native Win32 threads (THREAD_LIBS stays empty -- the
+    # AC_SEARCH_LIBS(pthread_create) probe that would set it only runs on non-mingw hosts),
+    # so the generated libxml-2.0.pc never records the pthread link flag. Every static consumer
+    # of libxml2.a -- e.g. FFmpeg's fontconfig check, whose closure reaches libxml-2.0 via
+    # fontconfig's Requires.private -- then dies at link with "undefined reference to
+    # pthread_mutex_lock/pthread_once/...", surfaced confusingly as "fontconfig not found using
+    # pkg-config". Record -lpthread in the installed .pc instead. The grep guard keeps this
+    # idempotent, and it deliberately runs even when 'make install' above is skipped by its
+    # touchfile on a resumed build.
+    if ! grep -q -- '-lpthread' $mingw_w64_x86_64_prefix/lib/pkgconfig/libxml-2.0.pc; then
+      sed -i 's/^Libs: \(.*\)$/Libs: \1 -lpthread/' $mingw_w64_x86_64_prefix/lib/pkgconfig/libxml-2.0.pc
+    fi
   cd ..
 } # [zlib, liblzma, iconv, dlfcn]
 
@@ -570,6 +583,21 @@ build_fontconfig() {
     fi
     generic_configure --enable-libxml2 --disable-docs # Use Libxml2 instead of Expat.
     do_make install
+    # fontconfig.pc's Libs.private is only 'ICONV_LIBS PKG_EXPAT_LIBS', and its
+    # Requires.private substitution is not reliably self-contained. Under FFmpeg's
+    # '--pkg-config-flags=--static', 'require_pkg_config fontconfig fontconfig/fontconfig.h FcInit'
+    # performs a FULL executable link from 'pkg-config --static --cflags --libs fontconfig';
+    # if that closure is missing the freetype/libxml2/lzma/zlib/iconv chain or the
+    # pthread/ws2_32/math it needs (libxml2 here is built against pthreads-win32), the
+    # link test fails and FFmpeg reports the misleading 'fontconfig not found using
+    # pkg-config' (the package is installed -- the link closure is just incomplete).
+    # Append the complete static closure so the fontconfig link test (and the final
+    # FFmpeg link) resolve. '#'-comment is a no-op to pkg-config but an idempotency
+    # marker so re-runs from the rolling sandbox cache don't append it twice.
+    _fcpc="$mingw_w64_x86_64_prefix/lib/pkgconfig/fontconfig.pc"
+    if [[ -f "$_fcpc" ]] && ! grep -q 'fontconfig-xp-static-closure' "$_fcpc"; then
+      sed -i 's|^Libs\.private:.*|& -lfreetype -lxml2 -llzma -lz -liconv -lpthread -lws2_32 -lm # fontconfig-xp-static-closure|' "$_fcpc"
+    fi
   cd ..
 } # freetype, libxml >= 2.6, python >= 3, [iconv, dlfcn]
 
