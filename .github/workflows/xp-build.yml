@@ -11,6 +11,8 @@
 # Trigger with Run workflow. Inputs:
 #   arch              32 = real 32-bit XP (default), 64 = XP x64 / Server 2003
 #   minutes_per_stage build minutes per stage (default 300; 4 stages = 20h/run)
+#   linkage           static = self-contained exes (default), shared = exes +
+#                     FFmpeg core DLLs (av*/sw*/postproc*) + a '-dev' package
 name: XP build (win32-core2)
 
 on:
@@ -22,6 +24,9 @@ on:
       minutes_per_stage:
         description: "Build minutes per stage (stages chain via cache)"
         default: "300"
+      linkage:
+        description: "static = self-contained exes; shared = exes + FFmpeg core DLLs (av*/sw*/postproc*) + dev package"
+        default: "static"
 
 permissions:
   contents: read
@@ -84,20 +89,27 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p logs
-          # Completion = the *FFmpeg* static package exists (deps like libfdk-aac/frei0r also
-          # drop their own .7z packages into redist/ as they build, so a loose *.7z glob here
-          # would falsely mark a half-finished build as done).
-          if [[ -f ffmpeg_local_builds/sandbox/.build-complete ]] || compgen -G "redist/*/ffmpeg-*-static-winxp-*.7z" >/dev/null; then
-            echo "Build already complete - nothing to do."; exit 0
-          fi
           ARCH="${{ inputs.arch }}"
-          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH, budget ${{ inputs.minutes_per_stage }}m =="
+          LINKAGE="${{ inputs.linkage }}"
+          case "$LINKAGE" in
+            static) STATIC_FLAG=y ;;
+            shared) STATIC_FLAG=n ;;
+            *) echo "::error::linkage must be 'static' or 'shared' (got '$LINKAGE')"; exit 1 ;;
+          esac
+          # Completion = the FFmpeg package *for this linkage* exists (deps like
+          # libfdk-aac/frei0r also drop their own .7z packages into redist/, and a
+          # static package says nothing about a shared build, so match the exact
+          # 'ffmpeg-<tag>-<linkage>-winxp-...' naming finalize_redist produces).
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LINKAGE ]] || compgen -G "redist/*/ffmpeg-*-$LINKAGE-winxp-*.7z" >/dev/null; then
+            echo "Build already complete ($LINKAGE) - nothing to do."; exit 0
+          fi
+          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH --linkage=$LINKAGE, budget ${{ inputs.minutes_per_stage }}m =="
           timeout --signal=TERM --kill-after=90 "${{ inputs.minutes_per_stage }}m" \
-            bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH" \
-            2>&1 | tee "logs/stage-${{ matrix.stage }}-arch$ARCH.log"
+            bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$STATIC_FLAG" \
+            2>&1 | tee "logs/stage-${{ matrix.stage }}-arch$ARCH-$LINKAGE.log"
           status=${PIPESTATUS[0]}
           if [[ $status -eq 0 ]]; then
-            touch ffmpeg_local_builds/sandbox/.build-complete
+            touch ffmpeg_local_builds/sandbox/.build-complete-$LINKAGE
             echo "== build completed in stage ${{ matrix.stage }} =="
           elif [[ $status -eq 124 ]]; then
             echo "== stage ${{ matrix.stage }} time budget exhausted; next stage resumes from cache =="
@@ -180,11 +192,25 @@ jobs:
           fi
           [[ -x "$OBJDUMP" ]] || { echo "objdump not built yet (no toolchain in cache) - skipping audit"; exit 0; }
           BLOCKLIST='\<(CancelIoEx|BCryptGenRandom|BCryptOpenAlgorithmProvider|BCryptCloseAlgorithmProvider|InitOnceExecuteOnce|InitOnceBeginInitialize|InitOnceComplete|InitializeSRWLock|AcquireSRWLockExclusive|AcquireSRWLockShared|ReleaseSRWLockExclusive|ReleaseSRWLockShared|TryAcquireSRWLockExclusive|TryAcquireSRWLockShared|InitializeConditionVariable|WakeConditionVariable|WakeAllConditionVariable|SleepConditionVariableCS|SleepConditionVariableSRW|GetTickCount64|CreateSymbolicLinkA|CreateSymbolicLinkW|SetThreadDescription|GetFileInformationByHandleEx|SetFileInformationByHandle|GetLogicalProcessorInformation|GetLogicalProcessorInformationEx|K32EnumProcesses|CreateWaitableTimerExA|CreateWaitableTimerExW|GetSystemTimePreciseAsFileTime|WSAPoll|GetAddrInfoExA|GetAddrInfoExW|inet_ntop|inet_pton|WSASendMsg|GetActiveProcessorCount|GetActiveProcessorGroupCount|GetMaximumProcessorCount|GetThreadGroupAffinity|SetThreadGroupAffinity|GetNumaProcessorNodeEx|GetNumaNodeProcessorMaskEx|GetNumaHighestNodeNumberEx|CreateFile2|InitializeProcThreadAttributeList|UpdateProcThreadAttribute|IsWow64Process2|[a-zA-Z_][a-zA-Z0-9_]*_s)\>'
-          fail=0
+          # Audit every shipped PE file: the three exes plus, for shared builds,
+          # FFmpeg's own core DLLs (av*/sw*/postproc*) from the install prefix.
+          if [[ "$ARCH" == "64" ]]; then
+            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/x86_64-w64-mingw32"
+          else
+            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
+          fi
+          FDIR="ffmpeg_local_builds/sandbox/win$ARCH-core2/FFmpeg_git"
+          files=()
           for exe in ffmpeg.exe ffplay.exe ffprobe.exe; do
-            f="ffmpeg_local_builds/sandbox/win$ARCH-core2/FFmpeg_git/$exe"
-            if [[ ! -f "$f" ]]; then echo "SKIP $exe (not built yet)"; continue; fi
-            echo "== $exe =="
+            if [[ -f "$FDIR/$exe" ]]; then files+=("$FDIR/$exe"); fi
+          done
+          for dll in "$PREFIX"/bin/{av,sw,postproc}*.dll; do
+            if [[ -f "$dll" ]]; then files+=("$dll"); fi
+          done
+          if [[ ${#files[@]} -eq 0 ]]; then echo "no exes/dlls built yet - skipping audit"; exit 0; fi
+          fail=0
+          for f in "${files[@]}"; do
+            echo "== $(basename "$f") =="
             dump=$("$OBJDUMP" -p "$f")
             major=$(grep -m1 -i MajorSubsystemVersion <<<"$dump" | awk '{print $2}')
             minor=$(grep -m1 -i MinorSubsystemVersion <<<"$dump" | awk '{print $2}')
@@ -210,13 +236,14 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
+          LINKAGE="${{ inputs.linkage }}"
           mkdir -p artifacts-out
           for d in redist/*/; do
-            if compgen -G "$d*static-winxp-*.7z" >/dev/null; then
+            if compgen -G "$d*-$LINKAGE-winxp-*.7z" >/dev/null; then
               cp -a "${d%/}"/. artifacts-out/
             fi
           done
-          pkg=$(ls artifacts-out/ffmpeg-*-static-winxp-*.7z 2>/dev/null | head -1)
+          pkg=$(ls artifacts-out/ffmpeg-*-$LINKAGE-winxp-*.7z 2>/dev/null | head -1)
           if [[ -n "$pkg" ]]; then
             echo "name=$(basename "$pkg" .7z)" >> "$GITHUB_OUTPUT"
             echo "Collected release files:"; ls -la artifacts-out/

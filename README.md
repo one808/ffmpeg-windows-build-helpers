@@ -115,6 +115,17 @@ scripts/build.sh [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags
   (`ffmpeg_local_builds/sandbox/win<arch>-<tier>/`). Omit for the original
   single-target behavior (container `ffmpeg-xp-baseline`, log
   `logs/build.log`, subdirectory `win32-core2/`).
+- `--linkage=static|shared` -- how FFmpeg's own libraries are linked (default
+  `static`). `static` = self-contained `ffmpeg.exe`/`ffplay.exe`/`ffprobe.exe`
+  with everything baked in. `shared` = the exes plus FFmpeg's core DLLs
+  (`avcodec-*.dll`, `avformat-*.dll`, `avutil-*.dll`, `avfilter-*.dll`,
+  `avdevice-*.dll`, `swresample-*.dll`, `swscale-*.dll`) in the same folder,
+  plus a companion `ffmpeg-<ver>-dev-winxp-*.7z` with import libs and headers
+  for linking your own programs against them. All third-party deps are always
+  linked statically into FFmpeg either way -- `shared` only splits FFmpeg's own
+  code into DLLs. The GitHub Actions workflow exposes the same choice as its
+  `linkage` input. Both modes run through the same XP-compatibility audit
+  (exes *and* DLLs are checked for Vista+-only imports).
 
 ### Building multiple CPU targets (`scripts/build-matrix.sh`)
 

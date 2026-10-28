@@ -8,7 +8,7 @@
 # sources under ffmpeg_local_builds/sandbox/ are bind-mounted from the host
 # and always survive regardless of the container's lifecycle.
 #
-# Usage: scripts/build.sh [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=...] [--tier=NAME]
+# Usage: scripts/build.sh [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=...] [--tier=NAME] [--linkage=static|shared]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -19,6 +19,8 @@ CFLAGS=""
 TIER="" # Short label for this target, e.g. "pentium3" or "nehalem-64" -- picks the container name and log file, so
         # each CPU tier/arch combo gets its own independently resumable container. Empty (the default) preserves
         # the original single-target names exactly: container "ffmpeg-xp-baseline", log "logs/build.log".
+LINKAGE=static # 'static' = self-contained ffmpeg/ffplay/ffprobe.exe (the default), 'shared' = exes + FFmpeg's own
+               # av*/sw*/postproc* core DLLs, plus a '-dev' package with import libs/headers.
 
 usage() {
   cat <<EOF
@@ -46,6 +48,12 @@ Usage: $0 [--rebuild-image] [--clean] [--cpus N] [--arch=32|64] [--cflags=STRING
                     original single-target behavior (container
                     "ffmpeg-xp-baseline", log "logs/build.log"). See
                     scripts/build-matrix.sh to build every tier in one go.
+  --linkage=KIND   'static' (default) or 'shared'. static = one self-contained
+                    ffmpeg/ffplay/ffprobe.exe set; shared = exes + FFmpeg's
+                    own core DLLs (avcodec/avformat/avutil/avfilter/avdevice/
+                    swresample/swscale) + a '-dev' package with import libs
+                    and headers. Maps to cross_compile_ffmpeg.sh's
+                    --build-ffmpeg-static=y|n.
 
 Notes:
   - Networking is forced IPv4-only ('podman run --network pasta:-4'). Some
@@ -68,17 +76,21 @@ while [[ $# -gt 0 ]]; do
     --arch=*) ARCH="${1#*=}"; shift ;;
     --cflags=*) CFLAGS="${1#*=}"; shift ;;
     --tier=*) TIER="${1#*=}"; shift ;;
+    --linkage=*)
+      LINKAGE="${1#*=}"
+      case "$LINKAGE" in static|shared) ;; *) echo "Error: --linkage must be 'static' or 'shared' (got '$LINKAGE')" >&2; exit 1 ;; esac
+      shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
 CONTAINER="ffmpeg-xp-${TIER:-baseline}"
-LOG="logs/build${TIER:+-$TIER}.log"
+LOG="logs/build${TIER:+-$TIER}$([[ $LINKAGE == shared ]] && echo -shared).log"
 
 # Build the inner cross_compile_ffmpeg.sh invocation. --cflags= is only added if set, so the default run keeps
 # using the script's own built-in default CFLAGS untouched (avoids re-quoting/re-stating it here).
-inner_cmd="cd /work/ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH"
+inner_cmd="cd /work/ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$([[ $LINKAGE == static ]] && echo y || echo n)"
 [[ -n "$CFLAGS" ]] && inner_cmd+=" --cflags='$CFLAGS'"
 
 mkdir -p logs
