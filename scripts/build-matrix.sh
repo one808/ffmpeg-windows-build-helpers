@@ -30,6 +30,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # 10.4.0 predates that microarch-level syntax).
 MATRIX=(
   "pentium3:32:-O2 -march=pentium3 -mtune=pentium3"
+  "pentium4:32:-O2 -march=pentium4 -mtune=generic" # SSE2 baseline for any SSE2-era XP machine (Pentium 4 / Athlon 64 / Sempron); pentium4 is just GCC's canonical i686+SSE2 ISA selection, -mtune=generic avoids P4-NetBurst-specific scheduling.
   "pentium-m:32:-O2 -march=pentium-m -mtune=pentium-m"
   "athlon64:32:-O2 -march=athlon64 -mtune=athlon64"
   "core2:32:-O2 -march=core2 -mtune=core2"

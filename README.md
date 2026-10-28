@@ -213,6 +213,17 @@ above for the full pre-defined tier matrix, from pre-SSE2 `pentium3` up
 through modern `sandybridge-64`) instead of editing the script for one-off
 targets.
 
+The GitHub Actions workflow exposes the same choice as its `cpu` dropdown
+(one entry per matrix tier -- the workflow reads each tier's arch/cflags
+straight from `scripts/build-matrix.sh`'s MATRIX table, so the two can't
+drift apart). For a build that runs on any SSE2-era XP machine (Pentium 4 /
+Athlon 64 / Sempron -- SSE2 but *not* the SSSE3 that the default `core2`
+build requires), pick the `pentium4` tier: `-O2 -march=pentium4
+-mtune=generic` (the `pentium4` march name is just GCC's canonical i686+SSE2
+ISA selection; `-mtune=generic` avoids Pentium 4 NetBurst-specific
+scheduling). `pentium-m`/`athlon64` are tuned SSE2 alternatives from the
+matrix.
+
 ### Dependency versions
 
 This build pulls in **63 third-party libraries** on top of FFmpeg itself (codecs,

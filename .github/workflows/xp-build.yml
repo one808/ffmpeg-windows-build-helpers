@@ -9,7 +9,10 @@
 # Order of stages is irrelevant - each stage is just "continue building".
 #
 # Trigger with Run workflow. Inputs:
-#   arch              32 = real 32-bit XP (default), 64 = XP x64 / Server 2003
+#   cpu             CPU tier from scripts/build-matrix.sh's MATRIX table. This
+#                   also picks the bitness: pentium3 = pre-SSE2, pentium4 = SSE2
+#                   generic baseline, pentium-m/athlon64 = SSE2, core2 = SSSE3
+#                   (default), amdfam10/nehalem = SSE4, *-64 = XP x64 targets.
 #   minutes_per_stage build minutes per stage (default 300; 4 stages = 20h/run)
 #   linkage           static = self-contained exes (default), shared = exes +
 #                     FFmpeg core DLLs (av*/sw*/postproc*) + a '-dev' package
@@ -18,9 +21,20 @@ name: XP build (win32-core2)
 on:
   workflow_dispatch:
     inputs:
-      arch:
-        description: "--arch: 32 = real XP, 64 = XP x64 / Server 2003"
-        default: "32"
+      cpu:
+        type: choice
+        description: "CPU tier (also picks bitness) -- see scripts/build-matrix.sh"
+        options:
+          - core2
+          - pentium3
+          - pentium4
+          - pentium-m
+          - athlon64
+          - amdfam10
+          - nehalem
+          - athlon64-64
+          - sandybridge-64
+        default: "core2"
       minutes_per_stage:
         description: "Build minutes per stage (stages chain via cache)"
         default: "300"
@@ -89,27 +103,37 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p logs
-          ARCH="${{ inputs.arch }}"
+          TIER="${{ inputs.cpu }}"
           LINKAGE="${{ inputs.linkage }}"
+          # Single source of truth for tier:arch:cflags is the MATRIX table in
+          # scripts/build-matrix.sh -- read the entry instead of duplicating it.
+          ARCH=$(sed -n "s/^  \"$TIER:\([0-9]*\):[^\"]*\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          CFLAGS=$(sed -n "s/^  \"$TIER:[0-9]*:\([^\"]*\)\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          if [[ -z "$ARCH" || -z "$CFLAGS" ]]; then
+            echo "::error::cpu tier '$TIER' not found in scripts/build-matrix.sh"; exit 1
+          fi
+          # Same label derivation as cross_compile_ffmpeg.sh (from -march=) -- it names
+          # the build subdir (win<arch>-<label>) and the release packages.
+          LABEL=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$CFLAGS" | head -1 | sed 's/^-march=//')
+          LABEL="${LABEL:-generic}"
           case "$LINKAGE" in
             static) STATIC_FLAG=y ;;
             shared) STATIC_FLAG=n ;;
             *) echo "::error::linkage must be 'static' or 'shared' (got '$LINKAGE')"; exit 1 ;;
           esac
-          # Completion = the FFmpeg package *for this linkage* exists (deps like
+          # Completion = the FFmpeg package for *this* tier+linkage exists (deps like
           # libfdk-aac/frei0r also drop their own .7z packages into redist/, and a
-          # static package says nothing about a shared build, so match the exact
-          # 'ffmpeg-<tag>-<linkage>-winxp-...' naming finalize_redist produces).
-          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LINKAGE ]] || compgen -G "redist/*/ffmpeg-*-$LINKAGE-winxp-*.7z" >/dev/null; then
-            echo "Build already complete ($LINKAGE) - nothing to do."; exit 0
+          # package from another tier/linkage says nothing about this build).
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]] || compgen -G "redist/*/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z" >/dev/null; then
+            echo "Build already complete ($TIER/$LINKAGE) - nothing to do."; exit 0
           fi
-          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH --linkage=$LINKAGE, budget ${{ inputs.minutes_per_stage }}m =="
+          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH --tier=$TIER --cflags='$CFLAGS' --linkage=$LINKAGE, budget ${{ inputs.minutes_per_stage }}m =="
           timeout --signal=TERM --kill-after=90 "${{ inputs.minutes_per_stage }}m" \
-            bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$STATIC_FLAG" \
-            2>&1 | tee "logs/stage-${{ matrix.stage }}-arch$ARCH-$LINKAGE.log"
+            bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$STATIC_FLAG --cflags='$CFLAGS'" \
+            2>&1 | tee "logs/stage-${{ matrix.stage }}-$TIER-$LINKAGE.log"
           status=${PIPESTATUS[0]}
           if [[ $status -eq 0 ]]; then
-            touch ffmpeg_local_builds/sandbox/.build-complete-$LINKAGE
+            touch ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE
             echo "== build completed in stage ${{ matrix.stage }} =="
           elif [[ $status -eq 124 ]]; then
             echo "== stage ${{ matrix.stage }} time budget exhausted; next stage resumes from cache =="
@@ -182,7 +206,12 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          ARCH="${{ inputs.arch }}"
+          TIER="${{ inputs.cpu }}"
+          LINKAGE="${{ inputs.linkage }}"
+          ARCH=$(sed -n "s/^  \"$TIER:\([0-9]*\):[^\"]*\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          CFLAGS=$(sed -n "s/^  \"$TIER:[0-9]*:\([^\"]*\)\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          LABEL=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$CFLAGS" | head -1 | sed 's/^-march=//')
+          LABEL="${LABEL:-generic}"
           if [[ "$ARCH" == "64" ]]; then
             OBJDUMP=ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/bin/x86_64-w64-mingw32-objdump
             MAJ=5; MIN=2  # XP x64 Edition / Server 2003 = NT 5.2
@@ -199,7 +228,7 @@ jobs:
           else
             PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
           fi
-          FDIR="ffmpeg_local_builds/sandbox/win$ARCH-core2/FFmpeg_git"
+          FDIR="ffmpeg_local_builds/sandbox/win$ARCH-$LABEL/FFmpeg_git"
           files=()
           for exe in ffmpeg.exe ffplay.exe ffprobe.exe; do
             if [[ -f "$FDIR/$exe" ]]; then files+=("$FDIR/$exe"); fi
@@ -237,13 +266,15 @@ jobs:
         run: |
           set -uo pipefail
           LINKAGE="${{ inputs.linkage }}"
+          TIER="${{ inputs.cpu }}"
+          ARCH=$(sed -n "s/^  \"$TIER:\([0-9]*\):[^\"]*\".*$/\1/p" scripts/build-matrix.sh | head -1)
           mkdir -p artifacts-out
           for d in redist/*/; do
-            if compgen -G "$d*-$LINKAGE-winxp-*.7z" >/dev/null; then
+            if compgen -G "$d*-$LINKAGE-winxp-*-${ARCH}bit.7z" >/dev/null; then
               cp -a "${d%/}"/. artifacts-out/
             fi
           done
-          pkg=$(ls artifacts-out/ffmpeg-*-$LINKAGE-winxp-*.7z 2>/dev/null | head -1)
+          pkg=$(ls artifacts-out/ffmpeg-*-$LINKAGE-winxp-*-${ARCH}bit.7z 2>/dev/null | head -1)
           if [[ -n "$pkg" ]]; then
             echo "name=$(basename "$pkg" .7z)" >> "$GITHUB_OUTPUT"
             echo "Collected release files:"; ls -la artifacts-out/
