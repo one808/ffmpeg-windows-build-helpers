@@ -1,22 +1,25 @@
 # Build Windows-XP-compatible FFmpeg on GitHub Actions (native Linux runner,
 # no container), then statically audit the result for XP safety.
 #
-# The build (cross GCC toolchain + ~63 pinned deps + FFmpeg) takes several
-# hours, longer than a single comfortable job, so it runs as N sequential
-# stages in one run. Every stage is time-boxed; when its budget runs out the
-# next stage resumes from the shared `ffmpeg_local_builds/sandbox` cache (the
-# build script marks finished deps with touchfiles and skips them).
-# Order of stages is irrelevant - each stage is just "continue building".
+# One job = one complete build (cross GCC toolchain + ~63 pinned deps + FFmpeg),
+# which takes roughly an hour on a 4-core runner. The build is resumable at the
+# dependency level (finished deps leave touchfiles under
+# ffmpeg_local_builds/sandbox/, which is preserved in a rolling actions/cache),
+# so if the time budget below is ever exhausted or a step fails, re-running
+# this workflow continues where it left off instead of starting over.
 #
 # Trigger with Run workflow. Inputs:
 #   cpu             CPU tier from scripts/build-matrix.sh's MATRIX table. This
 #                   also picks the bitness: pentium3 = pre-SSE2, pentium4 = SSE2
 #                   generic baseline, pentium-m/athlon64 = SSE2, core2 = SSSE3
 #                   (default), amdfam10/nehalem = SSE4, *-64 = XP x64 targets.
-#   minutes_per_stage build minutes per stage (default 300; 4 stages = 20h/run)
-#   linkage           static = self-contained exes (default), shared = exes +
-#                     FFmpeg core DLLs (av*/sw*/postproc*) + a '-dev' package
-name: XP build (win32-core2)
+#   linkage         static = self-contained exes (default), shared = exes +
+#                   FFmpeg core DLLs (av*/sw*/postproc*) + a '-dev' package
+#   build_minutes   build time budget before handing over to the next run
+#                   (default 300; the build itself typically needs ~60)
+name: FFmpeg XP build
+
+run-name: "FFmpeg XP build · ${{ inputs.cpu }} · ${{ inputs.linkage }}"
 
 on:
   workflow_dispatch:
@@ -35,12 +38,12 @@ on:
           - athlon64-64
           - sandybridge-64
         default: "core2"
-      minutes_per_stage:
-        description: "Build minutes per stage (stages chain via cache)"
-        default: "300"
       linkage:
         description: "static = self-contained exes; shared = exes + FFmpeg core DLLs (av*/sw*/postproc*) + dev package"
         default: "static"
+      build_minutes:
+        description: "Build time budget in minutes (state is cached; re-running resumes)"
+        default: "300"
 
 permissions:
   contents: read
@@ -51,13 +54,9 @@ concurrency:
 
 jobs:
   build:
+    name: "build · ${{ inputs.cpu }} · ${{ inputs.linkage }}"
     runs-on: ubuntu-24.04
-    timeout-minutes: 355 # hard job ceiling (GitHub max 360) > minutes_per_stage + setup
-    strategy:
-      max-parallel: 1 # stages must run one at a time: they share the sandbox cache
-      fail-fast: false
-      matrix:
-        stage: [1, 2, 3, 4]
+    timeout-minutes: 355 # hard job ceiling (GitHub max 360) > build_minutes + setup
     steps:
       - uses: actions/checkout@v4
 
@@ -85,8 +84,8 @@ jobs:
           gcc --version | head -1
 
       # Split restore/save (instead of actions/cache@v4) so the sandbox is saved
-      # even when the build step fails -- otherwise every failed stage loses its
-      # state and the next stage starts from zero.
+      # even when the build step fails -- otherwise a failed run loses its state
+      # and the next run starts from zero.
       - name: Restore build sandbox (rolling cache)
         id: cache-restore
         uses: actions/cache/restore@v4
@@ -94,12 +93,11 @@ jobs:
           path: |
             ffmpeg_local_builds/sandbox
             redist
-          key: sandbox-${{ github.run_id }}-${{ matrix.stage }}
+          key: sandbox-${{ github.run_id }}
           restore-keys: |
-            sandbox-${{ github.run_id }}-
             sandbox-
 
-      - name: "Build stage ${{ matrix.stage }} (resumable, time-boxed)"
+      - name: "Build (resumable, time-boxed ${{ inputs.build_minutes }}m)"
         run: |
           set -uo pipefail
           mkdir -p logs
@@ -127,18 +125,19 @@ jobs:
           if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]] || compgen -G "redist/*/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z" >/dev/null; then
             echo "Build already complete ($TIER/$LINKAGE) - nothing to do."; exit 0
           fi
-          echo "== stage ${{ matrix.stage }}: building --arch=$ARCH --tier=$TIER --cflags='$CFLAGS' --linkage=$LINKAGE, budget ${{ inputs.minutes_per_stage }}m =="
-          timeout --signal=TERM --kill-after=90 "${{ inputs.minutes_per_stage }}m" \
+          echo "== building --arch=$ARCH --tier=$TIER --cflags='$CFLAGS' --linkage=$LINKAGE, budget ${{ inputs.build_minutes }}m =="
+          timeout --signal=TERM --kill-after=90 "${{ inputs.build_minutes }}m" \
             bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$STATIC_FLAG --cflags='$CFLAGS'" \
-            2>&1 | tee "logs/stage-${{ matrix.stage }}-$TIER-$LINKAGE.log"
+            2>&1 | tee "logs/build-$TIER-$LINKAGE.log"
           status=${PIPESTATUS[0]}
           if [[ $status -eq 0 ]]; then
             touch ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE
-            echo "== build completed in stage ${{ matrix.stage }} =="
+            echo "== build completed =="
           elif [[ $status -eq 124 ]]; then
-            echo "== stage ${{ matrix.stage }} time budget exhausted; next stage resumes from cache =="
+            echo "::error::time budget exhausted -- build state is saved in cache; re-run this workflow (same inputs) to resume where it left off"
+            exit 1
           else
-            echo "::error::build failed (exit $status) in stage ${{ matrix.stage }}"
+            echo "::error::build failed (exit $status)"
             exit "$status"
           fi
 
@@ -149,7 +148,7 @@ jobs:
           path: |
             ffmpeg_local_builds/sandbox
             redist
-          key: sandbox-${{ github.run_id }}-${{ matrix.stage }}
+          key: sandbox-${{ github.run_id }}
 
       # Everything FFmpeg's configure needs us to see when a dep check dies with
       # "not found using pkg-config": that error also covers a failed compile/link
@@ -158,10 +157,15 @@ jobs:
         if: failure()
         run: |
           set +e -u  # diagnostics must never fail the step themselves
-          ARCH="${{ inputs.arch }}"
+          TIER="${{ inputs.cpu }}"
+          LINKAGE="${{ inputs.linkage }}"
+          ARCH=$(sed -n "s/^  \"$TIER:\([0-9]*\):[^\"]*\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          CFLAGS=$(sed -n "s/^  \"$TIER:[0-9]*:\([^\"]*\)\".*$/\1/p" scripts/build-matrix.sh | head -1)
+          LABEL=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$CFLAGS" | head -1 | sed 's/^-march=//')
+          LABEL="${LABEL:-generic}"
           PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
           CROSS="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-gcc"
-          FFMPEG_DIR="ffmpeg_local_builds/sandbox/win$ARCH-core2/FFmpeg_git"
+          FFMPEG_DIR="ffmpeg_local_builds/sandbox/win$ARCH-$LABEL/FFmpeg_git"
           echo "===== ffbuild/config.log tail (the exact failed command + error) ====="
           tail -n 80 "$FFMPEG_DIR/ffbuild/config.log" 2>/dev/null || echo "(no config.log)"
           echo
@@ -215,19 +219,16 @@ jobs:
           if [[ "$ARCH" == "64" ]]; then
             OBJDUMP=ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/bin/x86_64-w64-mingw32-objdump
             MAJ=5; MIN=2  # XP x64 Edition / Server 2003 = NT 5.2
+            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/x86_64-w64-mingw32"
           else
             OBJDUMP=ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-objdump
             MAJ=5; MIN=1  # real 32-bit XP = NT 5.1
+            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
           fi
           [[ -x "$OBJDUMP" ]] || { echo "objdump not built yet (no toolchain in cache) - skipping audit"; exit 0; }
           BLOCKLIST='\<(CancelIoEx|BCryptGenRandom|BCryptOpenAlgorithmProvider|BCryptCloseAlgorithmProvider|InitOnceExecuteOnce|InitOnceBeginInitialize|InitOnceComplete|InitializeSRWLock|AcquireSRWLockExclusive|AcquireSRWLockShared|ReleaseSRWLockExclusive|ReleaseSRWLockShared|TryAcquireSRWLockExclusive|TryAcquireSRWLockShared|InitializeConditionVariable|WakeConditionVariable|WakeAllConditionVariable|SleepConditionVariableCS|SleepConditionVariableSRW|GetTickCount64|CreateSymbolicLinkA|CreateSymbolicLinkW|SetThreadDescription|GetFileInformationByHandleEx|SetFileInformationByHandle|GetLogicalProcessorInformation|GetLogicalProcessorInformationEx|K32EnumProcesses|CreateWaitableTimerExA|CreateWaitableTimerExW|GetSystemTimePreciseAsFileTime|WSAPoll|GetAddrInfoExA|GetAddrInfoExW|inet_ntop|inet_pton|WSASendMsg|GetActiveProcessorCount|GetActiveProcessorGroupCount|GetMaximumProcessorCount|GetThreadGroupAffinity|SetThreadGroupAffinity|GetNumaProcessorNodeEx|GetNumaNodeProcessorMaskEx|GetNumaHighestNodeNumberEx|CreateFile2|InitializeProcThreadAttributeList|UpdateProcThreadAttribute|IsWow64Process2|[a-zA-Z_][a-zA-Z0-9_]*_s)\>'
           # Audit every shipped PE file: the three exes plus, for shared builds,
           # FFmpeg's own core DLLs (av*/sw*/postproc*) from the install prefix.
-          if [[ "$ARCH" == "64" ]]; then
-            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-x86_64/x86_64-w64-mingw32"
-          else
-            PREFIX="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/i686-w64-mingw32"
-          fi
           FDIR="ffmpeg_local_builds/sandbox/win$ARCH-$LABEL/FFmpeg_git"
           files=()
           for exe in ffmpeg.exe ffplay.exe ffprobe.exe; do
@@ -265,8 +266,8 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          LINKAGE="${{ inputs.linkage }}"
           TIER="${{ inputs.cpu }}"
+          LINKAGE="${{ inputs.linkage }}"
           ARCH=$(sed -n "s/^  \"$TIER:\([0-9]*\):[^\"]*\".*$/\1/p" scripts/build-matrix.sh | head -1)
           CFLAGS=$(sed -n "s/^  \"$TIER:[0-9]*:\([^\"]*\)\".*$/\1/p" scripts/build-matrix.sh | head -1)
           LABEL=$(grep -oE -- '-march=[A-Za-z0-9_-]+' <<<"$CFLAGS" | head -1 | sed 's/^-march=//')
@@ -282,13 +283,11 @@ jobs:
             echo "name=$(basename "$pkg" .7z)" >> "$GITHUB_OUTPUT"
             echo "Collected release files:"; ls -la artifacts-out/
           else
-            echo "No finished FFmpeg package in this stage - nothing to collect."
+            echo "No finished FFmpeg package in this run - nothing to collect."
           fi
 
       # One artifact per run, named exactly like the package inside it
-      # (e.g. "ffmpeg-n8.1.2-static-winxp-core2-32bit"). overwrite handles the
-      # harmless case where several stages see the finished cache and collect
-      # the same folder.
+      # (e.g. "ffmpeg-n8.1.2-static-winxp-pentium4-32bit").
       - name: Upload release artifact
         if: always() && steps.collect.outputs.name != ''
         uses: actions/upload-artifact@v4
@@ -299,12 +298,12 @@ jobs:
           retention-days: 30
 
       # Only when there is no finished package (i.e. a failed build) is a
-      # stage-logs artifact uploaded, purely for debugging.
+      # build-logs artifact uploaded, purely for debugging.
       - name: Upload build logs (no finished package)
         if: always() && steps.collect.outputs.name == ''
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-arch${{ inputs.arch }}-stage${{ matrix.stage }}
+          name: build-logs-${{ inputs.cpu }}-${{ inputs.linkage }}
           path: logs/**
           if-no-files-found: warn
           retention-days: 14
