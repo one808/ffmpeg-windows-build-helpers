@@ -277,7 +277,7 @@ jobs:
               cp -a "${d%/}"/. artifacts-out/
             fi
           done
-          pkg=$(ls artifacts-out/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z 2>/dev/null | head -1)
+          pkg=$(ls artifacts-out/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z 2>/dev/null | head -1) || true
           if [[ -n "$pkg" ]]; then
             echo "name=$(basename "$pkg" .7z)" >> "$GITHUB_OUTPUT"
             echo "Collected release files:"; ls -la artifacts-out/
