@@ -87,6 +87,38 @@ from its `C:\Windows\system32\` yourself. Keep them out of version control
 (e.g. under the already-gitignored `ffmpeg_local_builds/xp-reference-dlls/`)
 -- they're Microsoft copyrighted binaries.
 
+### GitHub Actions workflow (`.github/workflows/xp-build.yml`)
+
+Don't want to run podman locally? The **FFmpeg XP build** workflow runs the
+same `cross_compile_ffmpeg.sh` on a stock GitHub-hosted runner (no container),
+audits the result and uploads the release package. Trigger it from the
+Actions tab via *Run workflow*:
+
+- `cpu` -- dropdown with one entry per `scripts/build-matrix.sh` tier
+  (`pentium3`, `pentium4`, `athlon64`, `core2`, ..., `sandybridge-64`),
+  which also picks the bitness. The workflow reads each tier's arch/cflags
+  straight from the MATRIX table, so the two can't drift apart.
+- `linkage` -- `static` (default) or `shared`, same as
+  `scripts/build.sh --linkage=` above.
+- `build_minutes` -- time budget for the build step (default `300`; a
+  complete build takes roughly an hour on GitHub's 4-core runners).
+
+Every run and job is named after its target ("FFmpeg XP build · pentium4 ·
+static"), and the single uploaded artifact is named exactly like the package
+inside it (e.g. `ffmpeg-n8.1.2-static-winxp-pentium4-32bit`, containing the
+release folder with the `.7z` packages and `SHA256SUMS`). On success the
+workflow also runs the same two XP checks as `scripts/check-xp-compat.sh` (PE
+subsystem version ceiling + Vista+-only import scan) against the exes *and*,
+for shared builds, FFmpeg's core DLLs. On failure it dumps `ffbuild/config.log`,
+the relevant `.pc` closure and a manual re-run of the failed link test into the
+job log, and uploads a `build-logs-<tier>-<linkage>` artifact instead.
+
+Build state (`ffmpeg_local_builds/sandbox/`) is kept in a rolling
+`actions/cache` entry even when the build fails or overruns `build_minutes`, so
+re-running the workflow resumes where it left off -- same resumability as the
+local podman flow. (`build.yml`, the older podman-based workflow, remains
+available for manual runs as a fallback.)
+
 ### `scripts/build.sh` options
 
 ```
@@ -259,11 +291,18 @@ imported* symbol table. It cannot catch:
   driver, or codec-specific issues).
 
 Treat a clean audit as "very likely fine", not "guaranteed" -- an actual test
-run on real XP hardware (or a VM) remains the real verification step. As of
-2026-08-07 the `win32-core2` target has been built, audited clean (including
-via `--xp-system32=` against a real XP SP3 DLL set), **and confirmed working
-on real Windows XP SP3 32-bit hardware**. The other CPU/arch tiers in
-`scripts/build-matrix.sh` haven't been built or tested yet.
+run on real XP hardware (or a VM) remains the real verification step. Built,
+audited and tested so far:
+- `win32-core2` **static**: audited clean (including via `--xp-system32=`
+  against a real XP SP3 DLL set) **and confirmed working on real Windows XP
+  SP3 32-bit hardware** (2026-08-07).
+- `win32-core2` **shared** (core DLLs + `-dev` package) and `win32-pentium4`
+  **static** (the SSE2 baseline): built via the GitHub Actions workflow and
+  audited clean across every shipped PE file (3 exes, and 7 core DLLs for the
+  shared build), with the pentium4 binaries smoke-tested by hand (2026-10-29).
+
+The remaining CPU/arch tiers in `scripts/build-matrix.sh` haven't been built
+or tested yet.
 
 ### Known flaky upstream mirrors
 
@@ -274,7 +313,18 @@ normal link rot on a script whose dependencies track moving git branches):
   release asset instead.
 - `download.savannah.gnu.org` intermittently/persistently 502s on the
   freetype tarball -- now fetched from SourceForge instead.
+- `ftp://sourceware.org` and `ftp://gcc.gnu.org` silently hang (anonymous FTP
+  was retired) -- the toolchain's pthreads-win32/isl downloads now use
+  `https://` URLs.
+- The five dependencies that were pinned from `github.com/one808/*` forks
+  (x264, librist, libbluray, libdvdread, libdvdnav) lost their host when
+  those forks were deleted -- all five pinned commits were verified to exist
+  in the canonical upstreams and repointed there (`mirror/x264`,
+  `code.videolan.org/rist/librist`,
+  `code.videolan.org/videolan/{libbluray,libdvdread,libdvdnav}`), same SHAs.
 
 If a fresh mirror also goes down, that's not a code bug in this fork --
 just swap `download_and_unpack_file`'s URL for a working mirror of the same
-version.
+version. Git dependencies are pinned to exact commits, so a mirror swap like
+this can never change what gets built: any repo that serves the same SHA is
+byte-identical.
