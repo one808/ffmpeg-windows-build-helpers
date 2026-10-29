@@ -1351,6 +1351,20 @@ build_libcodec2() {
     fi
     mkdir -p build_dir
     cd build_dir
+      # codec2's src/CMakeLists.txt builds a NATIVE 'codec2_native' code generator
+      # (ExternalProject for generate_codebook) with no CMAKE_ARGS at all, so the
+      # exported WinXP-target CFLAGS leak into its host-compiler cmake configure --
+      # harmless when they happen to be valid on a 64-bit host (-march=core2 is), but
+      # -march=pentium4/-march=pentium3 make the host cc1 reject the whole thing with
+      # "CPU you selected does not support x86-64 instruction set" (and Ubuntu's
+      # default -fcf-protection is rejected for non-x86-64 targets too). Explicitly
+      # clear the flags for the native sub-build only; the cross build's own flags
+      # are already baked into its CMake cache at configure time.
+      # Idempotent (grep-guarded) and outside the .bak guard above so it also applies
+      # on a resumed build whose root CMakeLists.txt.bak already exists.
+      if ! grep -q 'CMAKE_ARGS -DCMAKE_C_FLAGS=' src/CMakeLists.txt; then
+        sed -i '/ExternalProject_Add(codec2_native/a\       CMAKE_ARGS -DCMAKE_C_FLAGS= -DCMAKE_CXX_FLAGS=' src/CMakeLists.txt
+      fi
       do_cmake ${PWD%/*} -DBUILD_SHARED_LIBS=0 -DUNITTEST=0 -DLPCNET=0
       do_make install
     cd ..
