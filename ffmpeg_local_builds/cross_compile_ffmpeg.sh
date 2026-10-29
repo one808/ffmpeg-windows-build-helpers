@@ -917,7 +917,7 @@ build_libxvid() {
 }
 
 build_libx264() {
-  do_git_checkout https://github.com/one808/x264.git "" "" 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
+  do_git_checkout https://github.com/mirror/x264.git "" "" 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
   cd x264_git
     if [[ ! -f configure.bak ]]; then # Change GCC optimization level.
       sed -i.bak "s/O3 -/O2 -/" configure
@@ -1122,7 +1122,7 @@ build_libsrt() {
 } # SRT streaming protocol; reuses the mbedtls we already build for FFmpeg's own TLS instead of adding yet another crypto lib.
 
 build_librist() {
-  do_git_checkout https://github.com/one808/librist.git librist_git "" 4f45ef8f78983892d52ccd52d9f675435b23738f
+  do_git_checkout https://code.videolan.org/rist/librist.git librist_git "" 4f45ef8f78983892d52ccd52d9f675435b23738f
   cd librist_git
     apply_patch $patch_dir/librist_winpthreads-scalar-pthread_t.patch -p1 # rist.c does "if (some_pthread_t)"; under winpthreads pthread_t is a struct (no implicit bool conversion), so this fails to compile ("used struct type value where scalar is required"). memcmp against a zeroed pthread_t works on both winpthreads and POSIX.
     apply_patch $patch_dir/librist_winxp-compatible-entropy.patch -p1 # src/crypto/random.c seeds its mbedTLS DRBG via BCryptGenRandom (bcrypt.dll / CNG) on _WIN32 unconditionally, regardless of the have_mingw_pthreads=true option above -- Vista+ only. Switch to the legacy CryptoAPI (CryptGenRandom), same fix as mbedtls's own entropy_poll.c patch.
@@ -1196,7 +1196,7 @@ build_chromaprint() {
 } # Audio fingerprinting (MusicBrainz-style).
 
 build_libbluray() {
-  do_git_checkout https://github.com/one808/libbluray.git libbluray_git "" 64bcf07f47452fb4724eef3febc40aaf7720d42a
+  do_git_checkout https://code.videolan.org/videolan/libbluray.git libbluray_git "" 64bcf07f47452fb4724eef3febc40aaf7720d42a
   cd libbluray_git
     git submodule update --init contrib/libudfread # contrib/libudfread is a submodule; --single-branch clone skips it.
     apply_patch $patch_dir/libbluray_winxp-compatible-strtok.patch -p1 # contrib/libudfread/src/udfread.c
@@ -1373,7 +1373,7 @@ build_libcodec2() {
 } # Very-low-bitrate speech codec (digital voice/ham radio use case).
 
 build_libdvdread() {
-  do_git_checkout https://github.com/one808/libdvdread.git libdvdread_git "" 3a1a072755a121d418359964f27451c28d9853e8
+  do_git_checkout https://code.videolan.org/videolan/libdvdread.git libdvdread_git "" 3a1a072755a121d418359964f27451c28d9853e8
   cd libdvdread_git
     # Meson-only these days, no autotools left (no configure.ac) -- same story as libbluray earlier.
     mkdir -p build_dir
@@ -1389,7 +1389,7 @@ build_libdvdread() {
 } # DVD structure/sector reading (libdvdnav's dependency).
 
 build_libdvdnav() {
-  do_git_checkout https://github.com/one808/libdvdnav.git libdvdnav_git "" e0c02b973c62081ee8dc109726e511e94c10f70e
+  do_git_checkout https://code.videolan.org/videolan/libdvdnav.git libdvdnav_git "" e0c02b973c62081ee8dc109726e511e94c10f70e
   cd libdvdnav_git
     # Meson-only, same as libdvdread above. 'enable_examples' already defaults to false.
     mkdir -p build_dir
