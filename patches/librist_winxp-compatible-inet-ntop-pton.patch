@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..fd6cecd
 --- /dev/null
 +++ b/src/xp-inet-compat.h
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,173 @@
 +/* librist. Copyright © 2026 SipRadius LLC. All right reserved.
 + *
 + * SPDX-License-Identifier: BSD-2-Clause
@@ -22,6 +22,10 @@ index 0000000..fd6cecd
 +#include <ws2tcpip.h>
 +#include <stdio.h>
 +#include <string.h>
++#include <stdlib.h> /* strtoul. Must be explicit: on non-SSE2 targets (e.g. -march=pentium3) the
++                    * transitive route some toolchains have (winnt.h's __SSE2__ -> emmintrin.h ->
++                    * mm_malloc.h -> stdlib.h) does not exist, and the implicit declaration then
++                    * collides with stdlib.h's real one: "conflicting types for 'strtoul'". */
 +
 +static inline const char *rist_xp_inet_ntop(int af, const void *src, char *dst, size_t size) {
 +	if (af == AF_INET) {
