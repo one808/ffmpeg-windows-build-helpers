@@ -29,7 +29,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # Concrete -march= names only (not x86-64-v2/v3 -- this toolchain's GCC
 # 10.4.0 predates that microarch-level syntax).
 MATRIX=(
-  "pentium3:32:-O2 -march=pentium3 -mtune=pentium3"
+  "pentium3:32:-O2 -march=pentium3 -mtune=athlon-xp -mfpmath=sse -msse" # Pre-SSE2 tier. Flags match Reino17's proven Athlon XP build (the original target CPU of this fork): Pentium 3 ISA baseline, Athlon XP scheduling, SSE (not x87) FP math. Note the tier name comes from -march= (it names the build subdir and release packages).
   "pentium4:32:-O2 -march=pentium4 -mtune=generic" # SSE2 baseline for any SSE2-era XP machine (Pentium 4 / Athlon 64 / Sempron); pentium4 is just GCC's canonical i686+SSE2 ISA selection, -mtune=generic avoids P4-NetBurst-specific scheduling.
   "pentium-m:32:-O2 -march=pentium-m -mtune=pentium-m"
   "athlon64:32:-O2 -march=athlon64 -mtune=athlon64"

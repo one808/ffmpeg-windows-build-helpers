@@ -337,6 +337,18 @@ apply_patch() {
     local type="-p0"
   fi
   local name="${1##*/}"
+  local patch_hash=$(md5sum < "$1" | cut -d' ' -f1) # Content hash: catches a patch file that changed after it was applied to this tree.
+  if [[ -f $name.done ]]; then
+    local applied_hash=$(cat "$name.done" 2>/dev/null)
+    if [[ -z "$applied_hash" ]]; then
+      echo "$patch_hash" > $name.done || exit 1 # Pre-hash legacy marker: adopt it (the tree matches whatever was applied back then).
+    elif [[ "$applied_hash" != "$patch_hash" ]]; then
+      echo -e "\e[1;31mERROR: patch '$name' has changed since it was applied to this source tree -- the tree holds stale patched code.\e[0m" >&2
+      echo "Delete the tree and re-run to rebuild it with the updated patch, e.g.:" >&2
+      echo "  rm -rf \"$PWD\"" >&2
+      exit 1
+    fi
+  fi
   if [[ ! -e $name.done ]]; then
     if [[ -f $name ]]; then
       rm $name || exit 1 # remove old version in case it has been since updated on the server...
@@ -344,7 +356,7 @@ apply_patch() {
     cp -v $1 . || exit 1
     echo -e "\e[1;33mApplying patch '$name'.\e[0m"
     patch $type -i "$name" || exit 1
-    touch $name.done || exit 1
+    echo "$patch_hash" > $name.done || exit 1
     rm -f already_ran* # if it's a new patch, reset everything too, in case it's really really really new
   else
     echo -e "\e[1;33mPatch '$name' already applied.\e[0m"
@@ -1131,6 +1143,7 @@ build_librist() {
     # both as plain DLL imports from ws2_32.dll regardless of target OS, but Windows XP's real ws2_32.dll never
     # exported them (added in Vista) -- librist calls them unconditionally across several files, so the missing
     # static import blocks the whole .exe from loading on XP entirely, not just RIST's IPv6 code path.
+    apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-stdlib.patch -p1 # The shim above calls strtoul without including <stdlib.h>. Kept as a separate follow-up patch (rather than folded into the base one) so it also applies to source trees that already have the base patch applied -- apply_patch markers are per-file, and a changed base patch would otherwise be silently skipped on such trees. Why it matters: on SSE2+ targets the include arrives transitively (winnt.h's __SSE2__ -> emmintrin.h -> mm_malloc.h -> stdlib.h) and everything compiles clean; on non-SSE2 targets (e.g. -march=pentium3) that chain doesn't exist and the implicit declaration collides with the real one: "conflicting types for 'strtoul'".
     apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-tun_cidr.patch -p1 # src/tun_cidr.c: #include the new shim.
     apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-udpsocket.patch -p1 # src/udpsocket.c: #include the new shim.
     apply_patch $patch_dir/librist_winxp-compatible-inet-ntop-pton-udp.patch -p1 # src/udp.c: #include the new shim.
