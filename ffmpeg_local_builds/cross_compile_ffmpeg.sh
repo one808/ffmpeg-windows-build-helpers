@@ -862,7 +862,8 @@ build_frei0r() {
     mkdir -p $redist_dir
     archive="$redist_dir/frei0r-plugins-$(git describe --tags | tail -c +2 | sed 's/g//')-${target_suffix}"
     if [[ ! -f $archive.7z ]]; then # Pack shared libraries.
-      for doc in AUTHORS ChangeLog COPYING README.md; do
+      for doc in AUTHORS AUTHORS.md ChangeLog CHANGELOG.md COPYING COPYING.md README.md README; do
+        [[ -f $doc ]] || continue # upstream has renamed these over time (AUTHORS -> AUTHORS.md); pack whichever exists instead of failing on a stale name
         sed "s/$/\r/" $doc > $mingw_w64_x86_64_prefix/lib/frei0r-1/$doc.txt
       done
       7z a -mx=9 -bb3 $archive.7z $mingw_w64_x86_64_prefix/lib/frei0r-1
