@@ -166,7 +166,7 @@ do_git_checkout() {
     if [[ $4 ]]; then
       cd $dir
         echo -e "\e[1;33mChanging head of $dir to ${4:0:7}.\e[0m"
-        git checkout $4 || exit 1
+        git checkout $4 || { echo "checkout by SHA failed (branch history may have been rewritten); trying fetch-by-sha"; git fetch --depth 1 origin $4 && git checkout $4; } || exit 1
       cd ..
     fi
   else
@@ -174,7 +174,7 @@ do_git_checkout() {
       if [[ $4 ]]; then
         if [[ $(git rev-parse HEAD) != $4 ]]; then
           echo -e "\e[1;33mChanging head of $dir to ${4:0:7}.\e[0m"
-          git checkout $4 || exit 1
+          git checkout $4 || { echo "checkout by SHA failed (branch history may have been rewritten); trying fetch-by-sha"; git fetch --depth 1 origin $4 && git checkout $4; } || exit 1
         else
           echo -e "\e[1;33mHead of $dir is already at ${4:0:7}.\e[0m"
         fi
@@ -929,7 +929,7 @@ build_libxvid() {
 }
 
 build_libx264() {
-  do_git_checkout https://github.com/mirror/x264.git "" "" 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
+  do_git_checkout https://code.videolan.org/videolan/x264.git "" "" 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee # NOT github.com/mirror/x264: its master branch has been rewritten and no longer contains this commit (its history is not the official one). The official code.videolan.org master still has it -- verified by a single-branch clone + cat-file.
   cd x264_git
     if [[ ! -f configure.bak ]]; then # Change GCC optimization level.
       sed -i.bak "s/O3 -/O2 -/" configure

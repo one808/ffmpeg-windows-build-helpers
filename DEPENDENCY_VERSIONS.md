@@ -56,7 +56,7 @@ Legend: ✅ latest available · ⚠️ genuinely behind · ℹ️ behind but not
 
 | Library | Pinned | Pinned date | Latest available | Status | Note |
 |---|---|---|---|---|---|
-| libx264 | `0480cb05` | 2025-09-10 | same | ✅ | |
+| libx264 | `0480cb05` | 2025-09-10 | same | ✅ | Source is `code.videolan.org/videolan/x264` master: `github.com/mirror/x264`'s master was rewritten and no longer contains this commit. |
 | libx265 | `b81f650e` | 2026-06-23 | same | ✅ | |
 | libvpx (VP8/VP9) | `251f0168` | 2026-08-04 | same | ✅ | |
 | libaom (AV1) | `01fd4524` | 2026-08-04 | same | ✅ | |
