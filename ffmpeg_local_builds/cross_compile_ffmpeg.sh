@@ -173,8 +173,9 @@ do_git_checkout() {
     cd $dir
       if [[ $4 ]]; then
         if [[ $(git rev-parse HEAD) != $4 ]]; then
-          echo -e "\e[1;33mChanging head of $dir to ${4:0:7}.\e[0m"
-          git checkout $4 || { echo "checkout by SHA failed (branch history may have been rewritten); trying fetch-by-sha"; git fetch --depth 1 origin $4 && git checkout $4; } || exit 1
+          echo -e "\e[1;33mChanging head of $dir to ${4:0:7} (pin changed: resetting tree; patches and build state get recreated from scratch).\e[0m"
+          git checkout -f $4 || { echo "checkout by SHA failed (branch history may have been rewritten); trying fetch-by-sha"; git fetch --depth 1 origin $4 && git checkout -f $4; } || exit 1
+          git clean -fd # a pin change invalidates everything derived from the old commit: applied patches (their .done markers would otherwise lie and skip re-application), configure/make touchfiles, and in-tree build output. All of it is recreated below.
         else
           echo -e "\e[1;33mHead of $dir is already at ${4:0:7}.\e[0m"
         fi
