@@ -56,7 +56,7 @@ e.g. `win32-core2/FFmpeg_git/ffmpeg.exe` for the default target (see
 and a packaged release archive at
 `redist/<timestamp>_ffmpeg-<version>_winxp-<cpu>-<bits>/ffmpeg-*-static-winxp-*.7z`
 -- each build run gets its own dated folder (e.g.
-`redist/2026_08_07_14_30_00_ffmpeg-n8.1.2_winxp-core2-32bit/`), containing a
+`redist/2026_10_31_12_00_00_ffmpeg-n9.0.2_winxp-core2-32bit/`), containing a
 `BUILD_INFO.txt` (version/target/CFLAGS summary) and a `SHA256SUMS` alongside
 every `.7z` produced that run.
 
@@ -105,7 +105,7 @@ Actions tab via *Run workflow*:
 
 Every run and job is named after its target ("FFmpeg XP build · pentium4 ·
 static"), and the single uploaded artifact is named exactly like the package
-inside it (e.g. `ffmpeg-n8.1.2-static-winxp-pentium4-32bit`, containing the
+inside it (e.g. `ffmpeg-n9.0.2-static-winxp-pentium4-32bit`, containing the
 release folder with the `.7z` packages and `SHA256SUMS`). On success the
 workflow also runs the same two XP checks as `scripts/check-xp-compat.sh` (PE
 subsystem version ceiling + Vista+-only import scan) against the exes *and*,

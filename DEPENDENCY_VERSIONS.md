@@ -29,7 +29,7 @@ Legend: ✅ latest available · ⚠️ genuinely behind · ℹ️ behind but not
 
 | Component | Pinned | Pinned commit date | Latest available | Status | Note |
 |---|---|---|---|---|---|
-| FFmpeg | n8.1.2 (`1c2c67c0`, `release/8.1`) | 2026-06-17 | n8.1.2 is still the newest **tagged** release; `release/8.1` branch has untagged commits after it (`9b6c8969`) | ✅ | Pinning to the release tag (not branch tip) is intentional/correct practice. |
+| FFmpeg | n9.0.2 (`946fcce0`, `release/9.0`) | 2026-10-31 | n9.0.2 is the newest **tagged** release; `release/9.1` exists but has no tag yet | ✅ | Bumped from n8.1.2 (2026-06-17 pin). All six XP patches apply cleanly to n9.0.2; the new release's only Vista+ API uses are either GetProcAddress-loaded (vsrc_gfxcapture_winrt) or in w32pthreads.h (unused because --disable-w32threads). |
 
 ## Cross-compiler toolchain (`patches/mingw-w64-build-r33`)
 

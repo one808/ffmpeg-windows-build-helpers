@@ -997,7 +997,7 @@ build_libaom() {
 } # cmake >= 3.5
 
 build_ffmpeg() {
-  do_git_checkout https://github.com/FFmpeg/FFmpeg.git "" release/8.1 1c2c67c0b9f7f66ab32c19dcf7f227bcd290aa4c # n8.1.2. Note: release tags live on their own release/X.Y branch, not master -- that's why the branch arg matters here.
+  do_git_checkout https://github.com/FFmpeg/FFmpeg.git "" release/9.0 946fcce07b6dcd0331c8cc609192aeff5e1924f8 # n9.0.2. Note: release tags live on their own release/X.Y branch, not master -- that's why the branch arg matters here. All six XP patches below were verified to apply cleanly to this tag (2026-10-31).
   cd FFmpeg_git
     apply_patch $patch_dir/0001-make-bcrypt-optional.patch -p1 # WinXP doesn't have 'bcrypt'. See https://github.com/FFmpeg/FFmpeg/commit/aedbf1640ced8fc09dc980ead2a387a59d8f7f68 and https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0001-make-bcrypt-optional-on-win32.patch.
     apply_patch $patch_dir/0002-windows-xp-compatible-CancelIoEx.patch -p1 # Otherwise you'd get "The procedure entry point CancelIoEx could not be located in the dynamic link library KERNEL32.dll" while running ffmpeg.exe, ffplay.exe, or ffprobe.exe, because 'CancelIoEx()' is only available on Windows Vista and later. See https://github.com/FFmpeg/FFmpeg/commit/53aa76686e7ff4f1f6625502503d7923cec8c10e, https://trac.ffmpeg.org/ticket/5717 and https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0002-windows-xp-compatible-CancelIoEx.patch.
@@ -1710,7 +1710,7 @@ redist_base_dir="${PWD%/*}/redist" # Captured here (before intro() below does 'c
 cpu_count=4 # Also drives every do_make's "-j $cpu_count", not just the gcc bootstrap; match this to the container's --cpus cap.
 build_timestamp=$(date +%Y_%m_%d_%H_%M_%S) # Captured once at script start, so every archive from this run lands in the same dated redist/ folder.
 build_timestamp_human=$(date +"%Y-%m-%d %H:%M:%S %Z") # Same moment, human-readable form for BUILD_INFO.txt.
-ffmpeg_version_tag="n8.1.2" # Keep in sync with the pinned commit in build_ffmpeg() below -- avoids a live 'git describe' at packaging time and lets the redist folder name be known before build_dependencies even starts (FFmpeg's own checkout, where 'git describe' would normally run, doesn't happen until build_apps, long after other archives may already need $redist_dir).
+ffmpeg_version_tag="n9.0.2" # Keep in sync with the pinned commit in build_ffmpeg() below -- avoids a live 'git describe' at packaging time and lets the redist folder name be known before build_dependencies even starts (FFmpeg's own checkout, where 'git describe' would normally run, doesn't happen until build_apps, long after other archives may already need $redist_dir).
 
 set_box_memory_size_bytes
 if [[ $box_memory_size_bytes -lt 600000000 ]]; then
@@ -1788,7 +1788,7 @@ FFmpeg XP build -- build info
 ==============================
 
 Build started:   $build_timestamp_human
-FFmpeg version:   $ffmpeg_version_tag (FFmpeg/FFmpeg.git, release/8.1 branch -- see cross_compile_ffmpeg.sh for the exact pinned commit)
+FFmpeg version:   $ffmpeg_version_tag (FFmpeg/FFmpeg.git, release/9.0 branch -- see cross_compile_ffmpeg.sh for the exact pinned commit)
 Target:           Windows XP (PE subsystem version <= 5.1), CPU tuning "$cpu_target_label", $arch_bits_label
 CFLAGS:           $original_cflags
 
