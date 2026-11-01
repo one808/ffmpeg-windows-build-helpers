@@ -119,12 +119,17 @@ jobs:
             shared) STATIC_FLAG=n ;;
             *) echo "::error::linkage must be 'static' or 'shared' (got '$LINKAGE')"; exit 1 ;;
           esac
-          # Completion = the FFmpeg package for *this* tier+linkage exists (deps like
-          # libfdk-aac/frei0r also drop their own .7z packages into redist/, and a
-          # package from another tier/linkage says nothing about this build).
-          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]] || compgen -G "redist/*/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z" >/dev/null; then
+          # Completion = the per-target marker written below after a successful
+          # build, and ONLY that. Deliberately not accepting "a package exists in
+          # redist/": failed or polluted runs leave packages behind too (they ride
+          # along in the cache), and one of those makes every re-run declare victory
+          # and repack the same broken files forever.
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]]; then
             echo "Build already complete ($TIER/$LINKAGE) - nothing to do."; exit 0
           fi
+          # Stale packages for THIS target (from failed runs) would otherwise be
+          # re-collected and re-uploaded alongside the fresh build's output.
+          rm -f redist/*/ffmpeg-*-$LINKAGE-winxp-$LABEL-${ARCH}bit.7z
           echo "== building --arch=$ARCH --tier=$TIER --cflags='$CFLAGS' --linkage=$LINKAGE, budget ${{ inputs.build_minutes }}m =="
           timeout --signal=TERM --kill-after=90 "${{ inputs.build_minutes }}m" \
             bash -c "cd ffmpeg_local_builds && ./cross_compile_ffmpeg.sh -d --sandbox-ok=y --arch=$ARCH --build-ffmpeg-static=$STATIC_FLAG --cflags='$CFLAGS'" \
