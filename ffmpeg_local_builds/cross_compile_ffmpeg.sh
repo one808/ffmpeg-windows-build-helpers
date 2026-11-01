@@ -172,7 +172,7 @@ do_git_checkout() {
   else
     cd $dir
       if [[ $4 ]]; then
-        if [[ $(git rev-parse HEAD) != $4 ]]; then
+        if [[ $(git rev-parse HEAD) != $(git rev-parse "$4^{commit}" 2>/dev/null || echo "$4") ]]; then # compare dereferenced commit shas: a pin can legitimately be an annotated *tag* object sha (e.g. mbedtls's mbedtls-3.6.7), which never equals HEAD's commit sha and would otherwise trigger a reset on every single run
           echo -e "\e[1;33mChanging head of $dir to ${4:0:7} (pin changed: resetting tree; patches and build state get recreated from scratch).\e[0m"
           git checkout -f $4 || { echo "checkout by SHA failed (branch history may have been rewritten); trying fetch-by-sha"; git fetch --depth 1 origin $4 && git checkout -f $4; } || exit 1
           git clean -fd # a pin change invalidates everything derived from the old commit: applied patches (their .done markers would otherwise lie and skip re-application), configure/make touchfiles, and in-tree build output. All of it is recreated below.
@@ -998,6 +998,17 @@ build_libaom() {
 } # cmake >= 3.5
 
 build_ffmpeg() {
+  # Purge any FFmpeg-owned artifacts a previous build left installed in the cross
+  # prefix. A shared build's do_make_install leaves import libs (libavcodec.dll.a
+  # &c.) and DLLs behind there; a later *static* build's link then silently picks
+  # those import libs up (the cross linker searches the sysroot lib dir) instead
+  # of the build-tree archives -- producing 'static' exes that actually import
+  # avcodec-*.dll and ship broken without them (observed on pentium3, where the
+  # shared run happened before the static one: a 550KB ffmpeg.exe importing all
+  # seven FFmpeg DLLs). Each mode starts from a clean slate; the shared branch's
+  # packaging reads what it just installed, so nothing is lost.
+  rm -f $mingw_w64_x86_64_prefix/lib/lib{avcodec,avdevice,avfilter,avformat,avutil,swresample,swscale,postproc}* \
+        $mingw_w64_x86_64_prefix/bin/{avcodec,avdevice,avfilter,avformat,avutil,swresample,swscale,postproc}*.dll
   do_git_checkout https://github.com/FFmpeg/FFmpeg.git "" release/9.0 946fcce07b6dcd0331c8cc609192aeff5e1924f8 # n9.0.2. Note: release tags live on their own release/X.Y branch, not master -- that's why the branch arg matters here. All six XP patches below were verified to apply cleanly to this tag (2026-10-31).
   cd FFmpeg_git
     apply_patch $patch_dir/0001-make-bcrypt-optional.patch -p1 # WinXP doesn't have 'bcrypt'. See https://github.com/FFmpeg/FFmpeg/commit/aedbf1640ced8fc09dc980ead2a387a59d8f7f68 and https://github.com/sherpya/mplayer-be/blob/master/patches/ff/0001-make-bcrypt-optional-on-win32.patch.
