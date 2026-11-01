@@ -119,12 +119,12 @@ jobs:
             shared) STATIC_FLAG=n ;;
             *) echo "::error::linkage must be 'static' or 'shared' (got '$LINKAGE')"; exit 1 ;;
           esac
-          # Completion = the per-target marker written below after a successful
-          # build, and ONLY that. Deliberately not accepting "a package exists in
-          # redist/": failed or polluted runs leave packages behind too (they ride
-          # along in the cache), and one of those makes every re-run declare victory
-          # and repack the same broken files forever.
-          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]]; then
+          # Completion = the per-target marker, written ONLY by the audit step after
+          # it has verified the shipped PE files. A build step that merely *ran to
+          # completion* must never mark completion itself: the polluted-build incident
+          # did exactly that and every re-run then declared victory on its own forged
+          # marker. The content check also rejects pre-fix markers (plain touch files).
+          if [[ -f ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE ]] && [[ "$(cat ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE)" == "v2-ok" ]]; then
             echo "Build already complete ($TIER/$LINKAGE) - nothing to do."; exit 0
           fi
           # Stale packages for THIS target (from failed runs) would otherwise be
@@ -136,8 +136,7 @@ jobs:
             2>&1 | tee "logs/build-$TIER-$LINKAGE.log"
           status=${PIPESTATUS[0]}
           if [[ $status -eq 0 ]]; then
-            touch ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE
-            echo "== build completed =="
+            echo "== build completed (pending XP audit; the audit step writes the completion marker) =="
           elif [[ $status -eq 124 ]]; then
             echo "::error::time budget exhausted -- build state is saved in cache; re-run this workflow (same inputs) to resume where it left off"
             exit 1
@@ -270,6 +269,12 @@ jobs:
               fi
             fi
           done
+          if [[ $fail -eq 0 && ${#files[@]} -gt 0 ]]; then
+            # Only a clean audit may declare the target complete.
+            mkdir -p ffmpeg_local_builds/sandbox
+            echo "v2-ok" > ffmpeg_local_builds/sandbox/.build-complete-$LABEL-$ARCH-$LINKAGE
+            echo "Audit clean -- marked $TIER/$LINKAGE complete."
+          fi
           exit $fail
 
       # Collect just the finished release folder -- redist/ accumulates stale
