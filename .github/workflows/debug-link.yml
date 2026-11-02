@@ -1,0 +1,46 @@
+# One-off debugging aid: restore the build sandbox from cache and dump the
+# evidence needed to explain the 'static exes import FFmpeg's own DLLs' mystery.
+name: Debug link
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "build subdir, e.g. win32-pentium3"
+        default: "win32-pentium3"
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore build sandbox
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ffmpeg_local_builds/sandbox
+            redist
+          key: sandbox-debug
+          restore-keys: |
+            sandbox-
+      - name: Dump link evidence
+        run: |
+          set +e
+          D="ffmpeg_local_builds/sandbox/${{ inputs.target }}/FFmpeg_git"
+          echo "===== ls libavcodec/ (what archive/import forms exist) ====="
+          ls -la "$D/libavcodec/" 2>/dev/null | grep -Ei "\.a|\.lib|\.dll" 
+          echo
+          echo "===== ffbuild/config.mak identity ====="
+          grep -E "^(SHARED|STATIC|CONFIG_SHARED|CONFIG_STATIC|SLIBNAME|SLIBNAME_WITH_MAJOR|LIBNAME|BUILDSUF|LD_LIB|LD_PATH|LDFLAGS|FFEXTRALIBS|FF_EXTRALIBS|LDXX?|CC)" "$D/ffbuild/config.mak" 2>/dev/null | head -20
+          echo
+          echo "===== the actual link command (make -n after touching one object) ====="
+          touch "$D/fftools/ffmpeg_opt.o"
+          make -C "$D" -n ffmpeg_g.exe 2>&1 | tail -4
+          echo
+          echo "===== exe imports ====="
+          OBJ="ffmpeg_local_builds/sandbox/cross_compilers/mingw-w64-i686/bin/i686-w64-mingw32-objdump"
+          "$OBJ" -p "$D/ffmpeg.exe" 2>/dev/null | grep -i "DLL Name" | head -12
