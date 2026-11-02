@@ -261,9 +261,11 @@ jobs:
             # Static builds must be self-contained: an exe importing FFmpeg's own DLLs
             # means it was linked against a shared build's leftover import libs in the
             # cross prefix instead of the build-tree archives -- and those DLLs are not
-            # part of the static package, so the exe ships broken.
+            # part of the static package, so the exe ships broken. Match the exact
+            # soname shape (<lib>-<major>.dll): a loose 'av*' pattern falsely flags
+            # perfectly legitimate XP system libraries like avicap32.dll/avifil32.dll.
             if [[ "$LINKAGE" == "static" ]]; then
-              dllhits=$(grep -ioE "DLL Name:[ ]*(av|sw|postproc)[^ ]*\.dll" <<<"$dump" | sort -u || true)
+              dllhits=$(grep -ioE "DLL Name:[ ]*(avcodec|avdevice|avfilter|avformat|avutil|swresample|swscale|postproc)-[0-9]+\.dll" <<<"$dump" | sort -u || true)
               if [[ -n "$dllhits" ]]; then
                 echo "  FAIL: static build imports FFmpeg's own DLLs:"; sed 's/^/    /' <<<"$dllhits"; fail=1
               fi
